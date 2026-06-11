@@ -170,6 +170,8 @@ def fetch_account(label, addr, host, password):
         else:
             link = "https://mail.yahoo.com/d/folders/1"
         headers = {k: msg.get(k, "") for k in ("List-Unsubscribe", "Precedence")}
+        reply_to = email.utils.parseaddr(decode_header(msg.get("Reply-To") or msg.get("From")))[1]
+        refs = " ".join((msg.get("References") or "").split()[-5:])
         item = {
             "account": label,
             "from_name": from_name or from_email,
@@ -179,6 +181,9 @@ def fetch_account(label, addr, host, password):
             "ts": int(date_ts),
             "unread": "\\Seen" not in flags,
             "link": link,
+            "msgid": msgid,
+            "reply_to": reply_to,
+            "references": refs,
         }
         item["bucket"] = heuristic_bucket(item, headers)
         items.append(item)

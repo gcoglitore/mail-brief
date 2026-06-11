@@ -85,6 +85,36 @@
   #junkList { display: none; margin-top: 8px; }
   #junkList .card { opacity: .65; }
 
+  .replyBtn {
+    margin-top: 8px; padding: 5px 16px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel2); color: var(--gold);
+    font-size: 12px; font-weight: 700;
+  }
+  #composeWrap {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 10;
+  }
+  #composeSheet {
+    position: absolute; left: 0; right: 0; bottom: 0; max-width: 760px; margin: 0 auto;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px 16px 0 0;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  }
+  #composeSheet h3 { font-size: 13px; letter-spacing: 1px; color: var(--dim); margin-bottom: 10px; }
+  #composeSheet input, #composeSheet textarea {
+    width: 100%; margin-bottom: 8px; padding: 10px 12px; border-radius: 9px;
+    border: 1px solid var(--line); background: var(--panel2); color: var(--text); font-size: 14px;
+  }
+  #composeSheet textarea { min-height: 120px; resize: vertical; font: inherit; }
+  #composeBtns { display: flex; gap: 10px; }
+  #composeSend {
+    flex: 1; padding: 12px; border: 0; border-radius: 9px; background: var(--gold);
+    color: #14100a; font-size: 15px; font-weight: 700; cursor: pointer;
+  }
+  #composeSend:disabled { opacity: .6; }
+  #composeCancel {
+    padding: 12px 18px; border: 1px solid var(--line); border-radius: 9px;
+    background: none; color: var(--dim); cursor: pointer;
+  }
+  #composeErr { color: var(--red); font-size: 13px; min-height: 18px; margin-top: 6px; }
   #accStatus { margin-top: 26px; font-size: 12px; color: var(--faint); }
   #accStatus .bad { color: var(--red); }
   #lockBtn { background: none; border: 0; color: var(--faint); font-size: 12px;
@@ -113,6 +143,20 @@
     <div id="content"></div>
     <div id="accStatus"></div>
     <button id="lockBtn">Sign out of this device</button>
+  </div>
+</div>
+
+<div id="composeWrap">
+  <div id="composeSheet">
+    <h3 id="composeTitle">REPLY</h3>
+    <input id="composeTo" type="email" placeholder="To">
+    <input id="composeSubj" type="text" placeholder="Subject">
+    <textarea id="composeBody" placeholder="Write your reply…"></textarea>
+    <div id="composeBtns">
+      <button id="composeSend">Send</button>
+      <button id="composeCancel">Cancel</button>
+    </div>
+    <div id="composeErr"></div>
   </div>
 </div>
 
@@ -158,7 +202,71 @@ function card(i, cls) {
 
   node.appendChild(el("div", "subj", i.subject || "(no subject)"));
   if (i.snippet) node.appendChild(el("div", "snip", i.snippet));
+
+  if (i.reply_to && i.msgid && i.bucket !== "junk") {
+    const btn = el("button", "replyBtn", "Reply");
+    btn.addEventListener("click", e => {
+      e.preventDefault();
+      e.stopPropagation();
+      openCompose(i);
+    });
+    node.appendChild(btn);
+  }
   return node;
+}
+
+const API = "https://mail-brief-gio.web.app/api/send";
+let composeItem = null;
+
+function openCompose(i) {
+  composeItem = i;
+  $("composeTitle").textContent = "REPLY FROM " + i.account;
+  $("composeTo").value = i.reply_to;
+  $("composeSubj").value = /^re:/i.test(i.subject || "") ? i.subject : "Re: " + (i.subject || "");
+  $("composeBody").value = "";
+  $("composeErr").textContent = "";
+  $("composeSend").disabled = false;
+  $("composeSend").textContent = "Send";
+  $("composeWrap").style.display = "block";
+  $("composeBody").focus();
+}
+
+function closeCompose() {
+  $("composeWrap").style.display = "none";
+  composeItem = null;
+}
+
+async function sendReply() {
+  if (!composeItem) return;
+  const body = $("composeBody").value.trim();
+  if (!body) { $("composeErr").textContent = "Write something first."; return; }
+  const btn = $("composeSend");
+  btn.disabled = true;
+  btn.textContent = "Sending…";
+  $("composeErr").textContent = "";
+  try {
+    const r = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key: localStorage.getItem("mailbrief_key"),
+        account: composeItem.account,
+        to: $("composeTo").value.trim(),
+        subject: $("composeSubj").value.trim(),
+        body: body,
+        inReplyTo: composeItem.msgid,
+        references: composeItem.references || "",
+      }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) throw new Error(data.error || "send failed");
+    btn.textContent = "Sent ✓";
+    setTimeout(closeCompose, 900);
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "Send";
+    $("composeErr").textContent = e.message || "Couldn't send — try again.";
+  }
 }
 
 function section(parent, label, color, items, cls, emptyText) {
@@ -254,6 +362,10 @@ function showKeyScreen() {
   $("app").style.display = "none";
   $("keyScreen").style.display = "block";
 }
+
+$("composeSend").addEventListener("click", sendReply);
+$("composeCancel").addEventListener("click", closeCompose);
+$("composeWrap").addEventListener("click", e => { if (e.target === $("composeWrap")) closeCompose(); });
 
 $("keyBtn").addEventListener("click", () => load($("keyInput").value.trim(), true));
 $("keyInput").addEventListener("keydown", e => { if (e.key === "Enter") $("keyBtn").click(); });

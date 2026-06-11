@@ -2,6 +2,15 @@
   "hosting": {
     "public": "public",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "/api/send",
+        "function": {
+          "functionId": "sendReply",
+          "region": "us-central1"
+        }
+      }
+    ],
     "headers": [
       {
         "source": "**",
