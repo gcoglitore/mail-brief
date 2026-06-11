@@ -35,6 +35,18 @@ only the Realtime Database holds it, behind the unguessable key path.
 IMAP hosts: Gmail/Workspace = `imap.gmail.com` (app password requires 2-Step
 Verification), Yahoo = `imap.mail.yahoo.com` (app password from Account Security).
 
+**After adding or changing MAIL_ACCOUNT secrets**, run BOTH workflows from the
+Actions tab: "Refresh Mail Brief" (starts fetching) and "Deploy Reply Function"
+(bakes the credentials into the reply sender — it only reads secrets at deploy
+time). The same app password powers both reading and replying.
+
+## Replying
+
+The Reply button POSTs to `/api/send` (Cloud Function `sendReply`, us-central1).
+Gate: the access key, checked with a timing-safe compare; 20 sends/hour cap;
+browser calls restricted to the app's origin. Replies thread correctly via
+In-Reply-To/References. Rotate the access key to revoke instantly.
+
 ## Rotating the access key
 
 Generate a new random key, update the `MAILBRIEF_ACCESS_KEY` secret, run the
