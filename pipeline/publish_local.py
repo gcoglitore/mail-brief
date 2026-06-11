@@ -13,10 +13,17 @@ Local credentials (this Mac only):
 
 import json
 import os
+import ssl
 import subprocess
 import sys
 import time
 import urllib.request
+
+try:  # macOS python.org installs often lack system root certs — use certifi's
+    import certifi
+    SSL_CTX = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    SSL_CTX = ssl.create_default_context()
 
 DB_URL = "https://mail-brief-gio-default-rtdb.firebaseio.com"
 HOME = os.path.expanduser("~")
@@ -54,7 +61,7 @@ def db_request(path, token, method="GET", payload=None):
         method=method,
         headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=30, context=SSL_CTX) as resp:
         return json.loads(resp.read() or b"null")
 
 

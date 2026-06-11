@@ -301,6 +301,10 @@ def main():
             statuses.append({"account": label, "ok": False, "error": str(exc)[:200]})
             print(f"{label}: FAILED — {exc}")
 
+    if not any(s.get("ok") for s in statuses):
+        print("Every account failed to log in — keeping the previously published brief untouched.")
+        sys.exit(0)
+
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if api_key:
         claude_refine(all_items, api_key)
