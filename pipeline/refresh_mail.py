@@ -152,7 +152,7 @@ def claude_refine(items, api_key):
 def fetch_account(label, addr, host, password):
     items = []
     box = imaplib.IMAP4_SSL(host)
-    box.login(addr, password)
+    box.login(addr, password.replace(" ", ""))
     box.select("INBOX", readonly=True)
     since = time.strftime("%d-%b-%Y", time.gmtime(time.time() - LOOKBACK_DAYS * 86400))
     _, data = box.search(None, f"(SINCE {since})")

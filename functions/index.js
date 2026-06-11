@@ -27,7 +27,7 @@ function findAccount(label) {
       return {
         email: parts[1].trim(),
         smtpHost: parts[2].trim().replace(/^imap\./, 'smtp.'),
-        password: parts[3],
+        password: parts[3].replace(/\s+/g, ''),
       };
     }
   }
