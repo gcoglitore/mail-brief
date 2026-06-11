@@ -606,6 +606,13 @@ $("keyBtn").addEventListener("click", () => load($("keyInput").value.trim(), tru
 $("keyInput").addEventListener("keydown", e => { if (e.key === "Enter") $("keyBtn").click(); });
 $("lockBtn").addEventListener("click", () => { localStorage.removeItem("mailbrief_key"); location.reload(); });
 
+// Magic-link sign-in: the access key may arrive in the URL fragment (#k=...).
+// Fragments never leave the device — they aren't sent to any server.
+if (location.hash.startsWith("#k=")) {
+  const k = location.hash.slice(3).trim();
+  if (k) localStorage.setItem("mailbrief_key", k);
+  history.replaceState(null, "", location.pathname);
+}
 const saved = localStorage.getItem("mailbrief_key");
 if (saved) load(saved, false); else showKeyScreen();
 setInterval(() => { const k = localStorage.getItem("mailbrief_key"); if (k && !document.hidden) load(k, false); }, 300000);

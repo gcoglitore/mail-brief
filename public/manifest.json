@@ -1,7 +1,6 @@
 {
   "name": "Mail Brief",
   "short_name": "MailBrief",
-  "start_url": "/",
   "display": "standalone",
   "background_color": "#0b0f14",
   "theme_color": "#0b0f14",
