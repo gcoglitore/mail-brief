@@ -81,18 +81,26 @@
   .subj { font-size: 14px; margin-top: 4px; }
   .snip { font-size: 12.5px; color: var(--dim); margin-top: 3px;
           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .card .fullBody {
-    display: none; white-space: pre-wrap; font-size: 13.5px; line-height: 1.5;
-    margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px;
-    max-height: 60vh; overflow-y: auto; word-break: break-word;
-  }
-  .card.open .fullBody { display: block; }
-  .card.open .snip { display: none; }
-  .cardActions { display: none; gap: 14px; align-items: center; margin-top: 10px; }
-  .card.open .cardActions { display: flex; }
-  .openLink { color: var(--blue); font-size: 12.5px; text-decoration: none; }
   .expandHint { color: var(--faint); font-size: 11px; margin-top: 5px; }
-  .card.open .expandHint { display: none; }
+
+  /* full-screen email reader */
+  #reader {
+    display: none; position: fixed; inset: 0; z-index: 5; background: var(--bg);
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+  }
+  #readerInner { max-width: 760px; margin: 0 auto; padding: 14px 16px calc(40px + env(safe-area-inset-bottom)); }
+  #readerBack {
+    background: none; border: 0; color: var(--gold); font-size: 15px; font-weight: 700;
+    cursor: pointer; padding: 10px 0; letter-spacing: .5px;
+  }
+  #readerMeta { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; }
+  #readerSubject { font-size: 18px; font-weight: 700; line-height: 1.3; margin: 6px 0 14px; }
+  #readerBody {
+    white-space: pre-wrap; font-size: 14.5px; line-height: 1.55; word-break: break-word;
+    border-top: 1px solid var(--line); padding-top: 14px;
+  }
+  #readerActions { display: flex; gap: 14px; align-items: center; margin: 18px 0 8px; }
+  .openLink { color: var(--blue); font-size: 13px; text-decoration: none; }
   .fyi .subj { color: var(--dim); }
   .fyi { opacity: .92; }
 
@@ -173,6 +181,23 @@
   </div>
 </div>
 
+<div id="reader">
+  <div id="readerInner">
+    <button id="readerBack">‹ Back</button>
+    <div id="readerMeta">
+      <span class="acct" id="readerAcct"></span>
+      <span class="from" id="readerFrom"></span>
+      <span class="ago" id="readerAgo"></span>
+    </div>
+    <div id="readerSubject"></div>
+    <div id="readerActions">
+      <button class="replyBtn" id="readerReply" style="margin-top:0">Reply</button>
+      <a class="openLink" id="readerOpen" target="_blank" rel="noopener">Open in mailbox ↗</a>
+    </div>
+    <div id="readerBody"></div>
+  </div>
+</div>
+
 <div id="composeWrap">
   <div id="composeSheet">
     <h3 id="composeTitle">REPLY</h3>
@@ -234,19 +259,10 @@ function card(i, cls) {
 
   if (hasBody) {
     node.appendChild(el("div", "expandHint", "tap to read"));
-    node.appendChild(el("div", "fullBody", i.body));
-    const actions = el("div", "cardActions");
-    if (link) {
-      const a = el("a", "openLink", "Open in mailbox ↗");
-      a.href = link; a.target = "_blank"; a.rel = "noopener";
-      a.addEventListener("click", e => e.stopPropagation());
-      actions.appendChild(a);
-    }
-    node.appendChild(actions);
     node.style.cursor = "pointer";
     node.addEventListener("click", e => {
       if (e.target.closest("a") || e.target.closest("button")) return;
-      node.classList.toggle("open");
+      openReader(i);
     });
   }
 
@@ -264,6 +280,27 @@ function card(i, cls) {
 
 const API = "https://mail-brief-gio.web.app/api/send";
 let composeItem = null;
+let readerItem = null;
+
+function openReader(i) {
+  readerItem = i;
+  $("readerAcct").textContent = i.account;
+  $("readerFrom").textContent = i.from_name || i.from_email || "?";
+  $("readerAgo").textContent = ago(i.ts);
+  $("readerSubject").textContent = i.subject || "(no subject)";
+  $("readerBody").textContent = i.body || "";
+  const link = safeLink(i.link);
+  $("readerOpen").style.display = link ? "inline" : "none";
+  if (link) $("readerOpen").href = link;
+  $("readerReply").style.display = (i.reply_to && i.msgid) ? "inline-block" : "none";
+  $("reader").style.display = "block";
+  $("reader").scrollTop = 0;
+}
+
+function closeReader() {
+  $("reader").style.display = "none";
+  readerItem = null;
+}
 
 function openCompose(i) {
   composeItem = i;
@@ -506,6 +543,9 @@ function showKeyScreen() {
   $("app").style.display = "none";
   $("keyScreen").style.display = "block";
 }
+
+$("readerBack").addEventListener("click", closeReader);
+$("readerReply").addEventListener("click", () => { if (readerItem) openCompose(readerItem); });
 
 $("composeSend").addEventListener("click", sendReply);
 $("composeCancel").addEventListener("click", closeCompose);
