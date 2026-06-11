@@ -81,6 +81,18 @@
   .subj { font-size: 14px; margin-top: 4px; }
   .snip { font-size: 12.5px; color: var(--dim); margin-top: 3px;
           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card .fullBody {
+    display: none; white-space: pre-wrap; font-size: 13.5px; line-height: 1.5;
+    margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px;
+    max-height: 60vh; overflow-y: auto; word-break: break-word;
+  }
+  .card.open .fullBody { display: block; }
+  .card.open .snip { display: none; }
+  .cardActions { display: none; gap: 14px; align-items: center; margin-top: 10px; }
+  .card.open .cardActions { display: flex; }
+  .openLink { color: var(--blue); font-size: 12.5px; text-decoration: none; }
+  .expandHint { color: var(--faint); font-size: 11px; margin-top: 5px; }
+  .card.open .expandHint { display: none; }
   .fyi .subj { color: var(--dim); }
   .fyi { opacity: .92; }
 
@@ -205,8 +217,10 @@ function safeLink(url) {
 
 function card(i, cls) {
   const link = safeLink(i.link);
-  const node = el(link ? "a" : "div", "card" + (cls ? " " + cls : ""));
-  if (link) { node.href = link; node.target = "_blank"; node.rel = "noopener"; }
+  const hasBody = !!i.body;
+  // Cards with full text are tap-to-expand containers; others link straight out.
+  const node = el(hasBody || !link ? "div" : "a", "card" + (cls ? " " + cls : ""));
+  if (!hasBody && link) { node.href = link; node.target = "_blank"; node.rel = "noopener"; }
 
   const row = el("div", "row1");
   if (i.unread) row.appendChild(el("span", "unread"));
@@ -217,6 +231,24 @@ function card(i, cls) {
 
   node.appendChild(el("div", "subj", i.subject || "(no subject)"));
   if (i.snippet) node.appendChild(el("div", "snip", i.snippet));
+
+  if (hasBody) {
+    node.appendChild(el("div", "expandHint", "tap to read"));
+    node.appendChild(el("div", "fullBody", i.body));
+    const actions = el("div", "cardActions");
+    if (link) {
+      const a = el("a", "openLink", "Open in mailbox ↗");
+      a.href = link; a.target = "_blank"; a.rel = "noopener";
+      a.addEventListener("click", e => e.stopPropagation());
+      actions.appendChild(a);
+    }
+    node.appendChild(actions);
+    node.style.cursor = "pointer";
+    node.addEventListener("click", e => {
+      if (e.target.closest("a") || e.target.closest("button")) return;
+      node.classList.toggle("open");
+    });
+  }
 
   if (i.reply_to && i.msgid && i.bucket !== "junk") {
     const btn = el("button", "replyBtn", "Reply");

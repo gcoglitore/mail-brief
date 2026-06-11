@@ -13,6 +13,7 @@ Configuration via environment variables (GitHub Actions secrets):
 import email
 import email.header
 import email.utils
+import html as html_lib
 import imaplib
 import json
 import os
@@ -26,6 +27,7 @@ DB_URL = "https://mail-brief-gio-default-rtdb.firebaseio.com"
 LOOKBACK_DAYS = 3
 MAX_PER_ACCOUNT = 60
 SNIPPET_LEN = 180
+BODY_LEN = 6000  # full readable text cap; junk items never carry a body
 
 JUNK_DOMAINS = (
     "goalphalabs.com", "orbitz.com", "reply.ebay.com", "learn.heygen.com",
@@ -53,8 +55,8 @@ def decode_header(value):
     return " ".join(out).strip()
 
 
-def body_snippet(msg):
-    """Extract a short plain-text snippet from a message."""
+def extract_text(msg):
+    """Extract readable plain text (paragraphs preserved) from a message."""
     part = msg
     if msg.is_multipart():
         part = None
@@ -75,11 +77,15 @@ def body_snippet(msg):
     except Exception:
         return ""
     if part.get_content_type() == "text/html":
-        text = re.sub(r"<style.*?</style>", " ", text, flags=re.S | re.I)
+        text = re.sub(r"<(style|script).*?</\1>", " ", text, flags=re.S | re.I)
+        text = re.sub(r"<br\s*/?>|</p>|</div>|</tr>|</li>|</h[1-6]>", "\n", text, flags=re.I)
         text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"&[a-z#0-9]+;", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:SNIPPET_LEN]
+    text = html_lib.unescape(text)
+    text = text.replace("‌", "").replace("͏", "")  # invisible padding chars
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" ?\n ?", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def heuristic_bucket(item, headers):
@@ -172,12 +178,14 @@ def fetch_account(label, addr, host, password):
         headers = {k: msg.get(k, "") for k in ("List-Unsubscribe", "Precedence")}
         reply_to = email.utils.parseaddr(decode_header(msg.get("Reply-To") or msg.get("From")))[1]
         refs = " ".join((msg.get("References") or "").split()[-5:])
+        text = extract_text(msg)
         item = {
             "account": label,
             "from_name": from_name or from_email,
             "from_email": from_email,
             "subject": decode_header(msg.get("Subject")) or "(no subject)",
-            "snippet": body_snippet(msg),
+            "snippet": re.sub(r"\s+", " ", text)[:SNIPPET_LEN],
+            "body": text[:BODY_LEN],
             "ts": int(date_ts),
             "unread": "\\Seen" not in flags,
             "link": link,
@@ -296,6 +304,11 @@ def main():
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if api_key:
         claude_refine(all_items, api_key)
+
+    # junk never carries full text — keeps the brief lean and the cloud footprint small
+    for i in all_items:
+        if i["bucket"] == "junk":
+            i.pop("body", None)
 
     all_items.sort(key=lambda i: i["ts"], reverse=True)
     brief = {
