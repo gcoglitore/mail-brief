@@ -1,0 +1,32 @@
+name: Deploy Mail Brief Hosting
+
+on:
+  push:
+    branches: [main]
+    paths: ['public/**', 'firebase.json', '.firebaserc']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+
+      - name: Install firebase-tools
+        run: npm install -g firebase-tools
+
+      - name: Write service account credentials
+        env:
+          SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA_JSON" > "$RUNNER_TEMP/firebase-sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
+
+      - name: Deploy to Firebase Hosting
+        run: firebase deploy --only hosting --project mail-brief-gio --non-interactive

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b0f14">
+<title>Mail Brief</title>
+<style>
+  :root {
+    --bg: #0b0f14; --panel: #121922; --panel2: #0f141c; --line: #1f2a37;
+    --text: #e6edf3; --dim: #8b98a5; --faint: #5c6773;
+    --gold: #d4a843; --red: #e0564f; --blue: #4a86e8; --green: #3fb37f;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 14px 14px 60px; }
+  header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 10px 2px 14px; border-bottom: 2px solid var(--gold); margin-bottom: 14px;
+  }
+  h1 { font-size: 20px; letter-spacing: 3px; font-weight: 800; }
+  h1 span { color: var(--gold); }
+  #updated { font-size: 12px; color: var(--dim); }
+  #updated.stale { color: var(--red); }
+
+  #keyScreen { display: none; text-align: center; padding: 80px 20px; }
+  #keyScreen h2 { font-size: 17px; margin-bottom: 6px; }
+  #keyScreen p { color: var(--dim); font-size: 13px; margin-bottom: 22px; }
+  #keyInput {
+    width: 100%; max-width: 360px; padding: 12px 14px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    font-size: 16px; text-align: center; letter-spacing: 1px;
+  }
+  #keyBtn {
+    margin-top: 14px; padding: 12px 34px; border: 0; border-radius: 10px;
+    background: var(--gold); color: #14100a; font-size: 15px; font-weight: 700; cursor: pointer;
+  }
+  #keyErr { color: var(--red); font-size: 13px; margin-top: 12px; min-height: 18px; }
+
+  #chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .chip {
+    padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--dim); font-size: 13px; cursor: pointer;
+  }
+  .chip.on { background: var(--gold); border-color: var(--gold); color: #14100a; font-weight: 700; }
+
+  .secHead {
+    display: flex; align-items: center; gap: 8px; margin: 20px 2px 10px;
+    font-size: 12px; font-weight: 800; letter-spacing: 2px; color: var(--dim);
+  }
+  .secHead .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .count { color: var(--faint); font-weight: 400; }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 8px; display: block; color: inherit;
+    text-decoration: none;
+  }
+  .card.attn { border-left: 3px solid var(--red); }
+  .row1 { display: flex; align-items: center; gap: 8px; }
+  .acct {
+    font-size: 10px; font-weight: 800; letter-spacing: 1px; padding: 2px 7px;
+    border-radius: 5px; background: var(--panel2); border: 1px solid var(--line); color: var(--gold);
+    white-space: nowrap;
+  }
+  .from { font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--blue); flex: none; }
+  .ago { margin-left: auto; color: var(--faint); font-size: 12px; white-space: nowrap; }
+  .subj { font-size: 14px; margin-top: 4px; }
+  .snip { font-size: 12.5px; color: var(--dim); margin-top: 3px;
+          display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .fyi .subj { color: var(--dim); }
+  .fyi { opacity: .92; }
+
+  #junkBar {
+    background: var(--panel2); border: 1px dashed var(--line); border-radius: 12px;
+    padding: 11px 14px; color: var(--dim); font-size: 13px; cursor: pointer;
+  }
+  #junkList { display: none; margin-top: 8px; }
+  #junkList .card { opacity: .65; }
+
+  #accStatus { margin-top: 26px; font-size: 12px; color: var(--faint); }
+  #accStatus .bad { color: var(--red); }
+  #lockBtn { background: none; border: 0; color: var(--faint); font-size: 12px;
+             text-decoration: underline; cursor: pointer; margin-top: 8px; }
+  .empty { color: var(--faint); font-size: 13px; padding: 8px 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>MAIL<span>BRIEF</span></h1>
+    <div id="updated"></div>
+  </header>
+
+  <div id="keyScreen">
+    <h2>Private Brief</h2>
+    <p>Enter your access key. It will be remembered on this device.</p>
+    <input id="keyInput" type="password" autocomplete="current-password" placeholder="access key">
+    <br>
+    <button id="keyBtn">Open</button>
+    <div id="keyErr"></div>
+  </div>
+
+  <div id="app" style="display:none">
+    <div id="chips"></div>
+    <div id="content"></div>
+    <div id="accStatus"></div>
+    <button id="lockBtn">Sign out of this device</button>
+  </div>
+</div>
+
+<script>
+// All email-derived strings (senders, subjects, snippets) are untrusted.
+// The UI is therefore built exclusively with createElement/textContent —
+// no HTML string assembly anywhere.
+const DB = "https://mail-brief-gio-default-rtdb.firebaseio.com";
+let BRIEF = null;
+let FILTER = "ALL";
+
+const $ = id => document.getElementById(id);
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function ago(ts) {
+  const s = Math.max(1, Math.floor(Date.now() / 1000 - ts));
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h";
+  return Math.floor(s / 86400) + "d";
+}
+
+function safeLink(url) {
+  return typeof url === "string" && url.startsWith("https://") ? url : null;
+}
+
+function card(i, cls) {
+  const link = safeLink(i.link);
+  const node = el(link ? "a" : "div", "card" + (cls ? " " + cls : ""));
+  if (link) { node.href = link; node.target = "_blank"; node.rel = "noopener"; }
+
+  const row = el("div", "row1");
+  if (i.unread) row.appendChild(el("span", "unread"));
+  row.appendChild(el("span", "acct", i.account));
+  row.appendChild(el("span", "from", i.from_name || i.from_email || "?"));
+  row.appendChild(el("span", "ago", ago(i.ts)));
+  node.appendChild(row);
+
+  node.appendChild(el("div", "subj", i.subject || "(no subject)"));
+  if (i.snippet) node.appendChild(el("div", "snip", i.snippet));
+  return node;
+}
+
+function section(parent, label, color, items, cls, emptyText) {
+  const head = el("div", "secHead");
+  const dot = el("span", "dot");
+  dot.style.background = color;
+  head.appendChild(dot);
+  head.appendChild(document.createTextNode(label + " "));
+  head.appendChild(el("span", "count", "(" + items.length + ")"));
+  parent.appendChild(head);
+  if (!items.length) {
+    parent.appendChild(el("div", "empty", emptyText));
+  } else {
+    items.forEach(i => parent.appendChild(card(i, cls)));
+  }
+}
+
+function render() {
+  if (!BRIEF) return;
+  const all = BRIEF.items || [];
+  const items = all.filter(i => FILTER === "ALL" || i.account === FILTER);
+  const attn = items.filter(i => i.bucket === "attention");
+  const fyi  = items.filter(i => i.bucket === "fyi");
+  const junk = items.filter(i => i.bucket === "junk");
+
+  const chips = $("chips");
+  chips.replaceChildren();
+  ["ALL", ...new Set(all.map(i => i.account))].forEach(a => {
+    const b = el("button", "chip" + (FILTER === a ? " on" : ""), a);
+    b.addEventListener("click", () => { FILTER = a; render(); });
+    chips.appendChild(b);
+  });
+
+  const content = $("content");
+  content.replaceChildren();
+  section(content, "NEEDS ATTENTION", "var(--red)", attn, "attn", "Nothing needs your attention.");
+  section(content, "FYI", "var(--blue)", fyi, "fyi", "Nothing here.");
+
+  const junkHead = el("div", "secHead");
+  const jdot = el("span", "dot"); jdot.style.background = "var(--faint)";
+  junkHead.appendChild(jdot);
+  junkHead.appendChild(document.createTextNode("JUNK "));
+  junkHead.appendChild(el("span", "count", "(" + junk.length + ")"));
+  content.appendChild(junkHead);
+
+  const senders = [...new Set(junk.map(j => j.from_name))].slice(0, 6).join(", ");
+  const junkBar = el("div", null,
+    junk.length + " junk emails kept out of your way" + (senders ? " — " + senders : "") + " (tap to view)");
+  junkBar.id = "junkBar";
+  const junkList = el("div");
+  junkList.id = "junkList";
+  junk.forEach(i => junkList.appendChild(card(i, "")));
+  junkBar.appendChild(junkList);
+  junkBar.addEventListener("click", e => {
+    if (e.target.closest("a")) return;
+    junkList.style.display = junkList.style.display === "block" ? "none" : "block";
+  });
+  content.appendChild(junkBar);
+
+  const gen = BRIEF.generated_at || 0;
+  const mins = Math.floor(Date.now() / 1000 - gen) / 60;
+  $("updated").textContent = "updated " + ago(gen) + " ago";
+  $("updated").className = mins > 90 ? "stale" : "";
+
+  const st = $("accStatus");
+  st.replaceChildren();
+  (BRIEF.accounts || []).forEach(a => {
+    const span = el("span", a.ok ? null : "bad",
+      a.ok ? "✓ " + a.account + " (" + a.count + ")"
+           : "✗ " + a.account + " — check its app password");
+    st.appendChild(span);
+    st.appendChild(document.createTextNode("   "));
+  });
+}
+
+async function load(key, fromButton) {
+  try {
+    const r = await fetch(DB + "/briefs/" + encodeURIComponent(key) + ".json");
+    const data = await r.json();
+    if (!data) throw new Error("empty");
+    BRIEF = data;
+    localStorage.setItem("mailbrief_key", key);
+    $("keyScreen").style.display = "none";
+    $("app").style.display = "block";
+    render();
+  } catch (e) {
+    if (fromButton) $("keyErr").textContent = "That key didn't open anything. Check it and try again.";
+    else showKeyScreen();
+  }
+}
+
+function showKeyScreen() {
+  $("app").style.display = "none";
+  $("keyScreen").style.display = "block";
+}
+
+$("keyBtn").addEventListener("click", () => load($("keyInput").value.trim(), true));
+$("keyInput").addEventListener("keydown", e => { if (e.key === "Enter") $("keyBtn").click(); });
+$("lockBtn").addEventListener("click", () => { localStorage.removeItem("mailbrief_key"); location.reload(); });
+
+const saved = localStorage.getItem("mailbrief_key");
+if (saved) load(saved, false); else showKeyScreen();
+setInterval(() => { const k = localStorage.getItem("mailbrief_key"); if (k && !document.hidden) load(k, false); }, 300000);
+document.addEventListener("visibilitychange", () => {
+  const k = localStorage.getItem("mailbrief_key");
+  if (!document.hidden && k) load(k, false);
+});
+</script>
+</body>
+</html>
