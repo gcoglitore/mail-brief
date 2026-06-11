@@ -6,6 +6,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0b0f14">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-180.png">
 <title>Mail Brief</title>
 <style>
   :root {
@@ -28,6 +30,10 @@
   h1 span { color: var(--gold); }
   #updated { font-size: 12px; color: var(--dim); }
   #updated.stale { color: var(--red); }
+  #netBar {
+    display: none; margin-bottom: 12px; padding: 9px 13px; border-radius: 10px;
+    font-size: 13px; background: var(--panel2); border: 1px solid var(--line); color: var(--gold);
+  }
 
   #keyScreen { display: none; text-align: center; padding: 80px 20px; }
   #keyScreen h2 { font-size: 17px; margin-bottom: 6px; }
@@ -139,6 +145,7 @@
   </div>
 
   <div id="app" style="display:none">
+    <div id="netBar"></div>
     <div id="chips"></div>
     <div id="content"></div>
     <div id="accStatus"></div>
@@ -244,28 +251,101 @@ async function sendReply() {
   btn.disabled = true;
   btn.textContent = "Sending…";
   $("composeErr").textContent = "";
+  const payload = {
+    key: localStorage.getItem("mailbrief_key"),
+    account: composeItem.account,
+    to: $("composeTo").value.trim(),
+    subject: $("composeSubj").value.trim(),
+    body: body,
+    inReplyTo: composeItem.msgid,
+    references: composeItem.references || "",
+  };
+  let r = null;
   try {
-    const r = await fetch(API, {
+    r = await fetch(API, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        key: localStorage.getItem("mailbrief_key"),
-        account: composeItem.account,
-        to: $("composeTo").value.trim(),
-        subject: $("composeSubj").value.trim(),
-        body: body,
-        inReplyTo: composeItem.msgid,
-        references: composeItem.references || "",
-      }),
+      body: JSON.stringify(payload),
     });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok || !data.ok) throw new Error(data.error || "send failed");
-    btn.textContent = "Sent ✓";
-    setTimeout(closeCompose, 900);
   } catch (e) {
+    // No connection — park it in the outbox; it sends on reconnect.
+    const q = outbox();
+    q.push({ payload, queuedAt: Date.now() });
+    setOutbox(q);
+    btn.textContent = "Saved to outbox ✓";
+    setTimeout(closeCompose, 1200);
+    return;
+  }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok || !data.ok) {
     btn.disabled = false;
     btn.textContent = "Send";
-    $("composeErr").textContent = e.message || "Couldn't send — try again.";
+    $("composeErr").textContent = data.error || "Couldn't send — try again.";
+    return;
+  }
+  btn.textContent = "Sent ✓";
+  setTimeout(closeCompose, 900);
+}
+
+/* ===== offline: outbox + status bar ===== */
+function outbox() {
+  try { return JSON.parse(localStorage.getItem("mailbrief_outbox") || "[]"); }
+  catch (e) { return []; }
+}
+function setOutbox(q) {
+  localStorage.setItem("mailbrief_outbox", JSON.stringify(q));
+  updateNetBar();
+}
+
+let isOffline = false;
+function updateNetBar(offline, note) {
+  if (offline !== undefined) isOffline = offline;
+  const q = outbox();
+  const parts = [];
+  if (note) parts.push(note);
+  if (isOffline) {
+    const at = (BRIEF && BRIEF.generated_at) || 0;
+    parts.push("Offline — showing mail from " + (at ? ago(at) + " ago" : "your last visit"));
+  }
+  if (q.length) {
+    parts.push(q.length + (q.length === 1 ? " reply" : " replies") + " in outbox — sends when online" +
+      (q[0].error ? " (last try: " + q[0].error + ")" : ""));
+  }
+  const bar = $("netBar");
+  bar.textContent = parts.join("  ·  ");
+  bar.style.display = parts.length ? "block" : "none";
+}
+
+let flushing = false;
+async function flushOutbox() {
+  if (flushing) return;
+  const q = outbox();
+  if (!q.length) return;
+  flushing = true;
+  const remaining = [];
+  let sentCount = 0;
+  for (let n = 0; n < q.length; n++) {
+    const entry = q[n];
+    let r = null;
+    try {
+      r = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(entry.payload),
+      });
+    } catch (e) {
+      remaining.push(...q.slice(n)); // still offline — keep the rest queued
+      break;
+    }
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data.ok) { sentCount++; }
+    else { entry.error = data.error || "rejected"; remaining.push(entry); }
+  }
+  setOutbox(remaining);
+  flushing = false;
+  if (sentCount) {
+    updateNetBar(undefined, "✓ " + sentCount + (sentCount === 1 ? " queued reply" : " queued replies") + " sent");
+    setTimeout(() => updateNetBar(), 5000);
   }
 }
 
@@ -343,18 +423,42 @@ function render() {
 }
 
 async function load(key, fromButton) {
+  let badKey = false;
   try {
     const r = await fetch(DB + "/briefs/" + encodeURIComponent(key) + ".json");
     const data = await r.json();
-    if (!data) throw new Error("empty");
+    if (!data) { badKey = true; throw new Error("badkey"); }
     BRIEF = data;
     localStorage.setItem("mailbrief_key", key);
+    localStorage.setItem("mailbrief_cache", JSON.stringify(data));
     $("keyScreen").style.display = "none";
     $("app").style.display = "block";
     render();
+    updateNetBar(false);
+    flushOutbox();
+    return;
   } catch (e) {
-    if (fromButton) $("keyErr").textContent = "That key didn't open anything. Check it and try again.";
-    else showKeyScreen();
+    if (!badKey) {
+      // Network failure — fall back to the last brief we saw on this device.
+      const cached = localStorage.getItem("mailbrief_cache");
+      if (cached && localStorage.getItem("mailbrief_key")) {
+        try {
+          BRIEF = JSON.parse(cached);
+          $("keyScreen").style.display = "none";
+          $("app").style.display = "block";
+          render();
+          updateNetBar(true);
+          return;
+        } catch (e2) { /* corrupt cache — fall through */ }
+      }
+    }
+    if (fromButton) {
+      $("keyErr").textContent = badKey
+        ? "That key didn't open anything. Check it and try again."
+        : "No connection — try again when you're online.";
+    } else {
+      showKeyScreen();
+    }
   }
 }
 
@@ -378,6 +482,16 @@ document.addEventListener("visibilitychange", () => {
   const k = localStorage.getItem("mailbrief_key");
   if (!document.hidden && k) load(k, false);
 });
+window.addEventListener("online", () => {
+  updateNetBar(false);
+  flushOutbox();
+  const k = localStorage.getItem("mailbrief_key");
+  if (k) load(k, false);
+});
+window.addEventListener("offline", () => updateNetBar(true));
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
 </script>
 </body>
 </html>
