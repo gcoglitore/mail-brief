@@ -31,6 +31,7 @@ only the Realtime Database holds it, behind the unguessable key path.
 | `MAILBRIEF_ACCESS_KEY` | the private key segment of the database path |
 | `FIREBASE_SERVICE_ACCOUNT` | service-account JSON used to write the database and deploy hosting |
 | `ANTHROPIC_API_KEY` | optional — turns on Claude classification |
+| `GH_DISPATCH_TOKEN` | optional — powers the app's "Update now" (↻) button. Fine-grained PAT, this repo only, Actions: Read and write. Re-run "Deploy Reply Function" after adding. |
 
 IMAP hosts: Gmail/Workspace = `imap.gmail.com` (app password requires 2-Step
 Verification), Yahoo = `imap.mail.yahoo.com` (app password from Account Security).
