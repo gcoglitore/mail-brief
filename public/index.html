@@ -28,8 +28,16 @@
   }
   h1 { font-size: 20px; letter-spacing: 3px; font-weight: 800; }
   h1 span { color: var(--gold); }
+  #hdrRight { display: flex; align-items: center; gap: 8px; }
   #updated { font-size: 12px; color: var(--dim); }
   #updated.stale { color: var(--red); }
+  #updateBtn {
+    width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line);
+    background: var(--panel); color: var(--gold); font-size: 16px; cursor: pointer;
+    line-height: 1; padding: 0;
+  }
+  #updateBtn.spin { animation: rot 1s linear infinite; opacity: .7; }
+  @keyframes rot { to { transform: rotate(360deg); } }
   #netBar {
     display: none; margin-bottom: 12px; padding: 9px 13px; border-radius: 10px;
     font-size: 13px; background: var(--panel2); border: 1px solid var(--line); color: var(--gold);
@@ -158,7 +166,10 @@
 <div class="wrap">
   <header>
     <h1>MAIL<span>BRIEF</span></h1>
-    <div id="updated"></div>
+    <div id="hdrRight">
+      <span id="updated"></span>
+      <button id="updateBtn" title="Update now">↻</button>
+    </div>
   </header>
 
   <div id="keyScreen">
@@ -543,6 +554,46 @@ function showKeyScreen() {
   $("app").style.display = "none";
   $("keyScreen").style.display = "block";
 }
+
+async function updateNow() {
+  const btn = $("updateBtn");
+  const key = localStorage.getItem("mailbrief_key");
+  if (!key || btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add("spin");
+  const before = BRIEF && BRIEF.generated_at;
+  load(key, false); // instant display refresh while the robot spins up
+  const done = note => {
+    btn.disabled = false;
+    btn.classList.remove("spin");
+    if (note) { updateNetBar(undefined, note); setTimeout(() => updateNetBar(), 6000); }
+  };
+  let resp = null;
+  try {
+    resp = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, action: "refresh" }),
+    });
+  } catch (e) {
+    return done("↻ Offline — pull again when you have a connection");
+  }
+  const d = await resp.json().catch(() => ({}));
+  if (!resp.ok || !d.ok) return done("↻ " + (d.error || "couldn't start the check"));
+  updateNetBar(undefined, "↻ Checking your mailboxes — takes about a minute");
+  const t0 = Date.now();
+  const poll = setInterval(async () => {
+    await load(key, false);
+    if (BRIEF && BRIEF.generated_at !== before) {
+      clearInterval(poll);
+      done("✓ Updated just now");
+    } else if (Date.now() - t0 > 180000) {
+      clearInterval(poll);
+      done("Checked — nothing new arrived");
+    }
+  }, 12000);
+}
+$("updateBtn").addEventListener("click", updateNow);
 
 $("readerBack").addEventListener("click", closeReader);
 $("readerReply").addEventListener("click", () => { if (readerItem) openCompose(readerItem); });

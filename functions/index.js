@@ -8,6 +8,7 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 
 const sentLog = []; // in-memory send timestamps; resets on cold start
+let lastDispatch = 0; // cooldown for update-now requests
 
 function keyOk(given) {
   const expected = process.env.MAILBRIEF_ACCESS_KEY || '';
@@ -42,8 +43,38 @@ functions.http('sendReply', async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(204).send('');
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
-  const { key, account, to, subject, body, inReplyTo, references } = req.body || {};
+  const { key, account, to, subject, body, inReplyTo, references, action } = req.body || {};
   if (!keyOk(key)) return res.status(401).json({ error: 'bad key' });
+
+  if (action === 'refresh') {
+    // "Update now": kick the mail-check workflow immediately.
+    const ghToken = process.env.GH_DISPATCH_TOKEN;
+    if (!ghToken) {
+      return res.status(503).json({ error: 'update-now not set up yet — add the GH_DISPATCH_TOKEN secret and redeploy' });
+    }
+    if (Date.now() - lastDispatch < 120000) {
+      return res.json({ ok: true, note: 'already checking' });
+    }
+    const r = await fetch(
+      'https://api.github.com/repos/gcoglitore/mail-brief/actions/workflows/refresh-mail.yml/dispatches',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + ghToken,
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'mail-brief',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ref: 'main' }),
+      }
+    );
+    if (r.status === 204) {
+      lastDispatch = Date.now();
+      return res.json({ ok: true });
+    }
+    return res.status(502).json({ error: 'GitHub answered ' + r.status });
+  }
 
   const now = Date.now();
   while (sentLog.length && now - sentLog[0] > 3600000) sentLog.shift();
