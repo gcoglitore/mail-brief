@@ -2,7 +2,7 @@ name: Refresh Mail Brief
 
 on:
   schedule:
-    - cron: '7,37 * * * *'
+    - cron: '4,19,34,49 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -18,10 +18,18 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install google-auth
+        run: pip install google-auth pywebpush
+
+      - name: Write notification key
+        env:
+          VAPID_PEM: ${{ secrets.VAPID_PRIVATE_KEY }}
+        run: |
+          printf '%s' "$VAPID_PEM" > "$RUNNER_TEMP/vapid.pem"
+          echo "VAPID_PEM_PATH=$RUNNER_TEMP/vapid.pem" >> "$GITHUB_ENV"
 
       - name: Fetch, classify, publish
         env:
+          VAPID_SUB: ${{ secrets.VAPID_SUB }}
           MAIL_ACCOUNT_1: ${{ secrets.MAIL_ACCOUNT_1 }}
           MAIL_ACCOUNT_2: ${{ secrets.MAIL_ACCOUNT_2 }}
           MAIL_ACCOUNT_3: ${{ secrets.MAIL_ACCOUNT_3 }}

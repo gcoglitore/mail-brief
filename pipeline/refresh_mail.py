@@ -191,6 +191,73 @@ def fetch_account(label, addr, host, password):
     return items
 
 
+def item_id(i):
+    return i.get("msgid") or "{}|{}|{}".format(i.get("from_email", ""), i.get("subject", ""), i.get("ts", ""))
+
+
+def db_get(path, token):
+    req = urllib.request.Request(DB_URL + path, headers={"Authorization": "Bearer " + token})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read() or b"null")
+
+
+def previous_attention_ids(key, token):
+    """IDs of attention items from the last published brief, or None on first run."""
+    try:
+        prev = db_get(f"/briefs/{key}/brief.json", token)
+        if not prev:
+            return None
+        return {item_id(i) for i in prev.get("items", []) if i.get("bucket") == "attention"}
+    except Exception:
+        return None
+
+
+def notify_subscribers(new_items, key, token):
+    """Web-push a buzz to every subscribed device about newly arrived attention mail."""
+    pem_path = os.environ.get("VAPID_PEM_PATH")
+    claim = os.environ.get("VAPID_SUB")
+    if not pem_path or not claim:
+        return
+    try:
+        from pywebpush import webpush, WebPushException
+    except ImportError:
+        print("pywebpush not installed — skipping notifications")
+        return
+    try:
+        subs = db_get(f"/briefs/{key}/subs.json", token) or {}
+    except Exception:
+        return
+    if not subs:
+        return
+    if len(new_items) == 1:
+        title, body = new_items[0]["from_name"], new_items[0]["subject"]
+    else:
+        title = f"{len(new_items)} important emails"
+        body = "; ".join(i["from_name"] for i in new_items[:4])
+    payload = json.dumps({"title": title[:80], "body": body[:180],
+                          "url": "https://mail-brief-gio.web.app"})
+    sent = 0
+    for sid, rec in subs.items():
+        sub = (rec or {}).get("sub")
+        if not sub:
+            continue
+        try:
+            webpush(subscription_info=sub, data=payload,
+                    vapid_private_key=pem_path, vapid_claims={"sub": claim})
+            sent += 1
+        except WebPushException as exc:
+            code = getattr(getattr(exc, "response", None), "status_code", None)
+            if code in (404, 410):  # device unsubscribed — clean it up
+                req = urllib.request.Request(f"{DB_URL}/briefs/{key}/subs/{sid}.json",
+                                             method="DELETE",
+                                             headers={"Authorization": "Bearer " + token})
+                try:
+                    urllib.request.urlopen(req, timeout=15)
+                except Exception:
+                    pass
+    print(f"Notifications: buzzed {sent} device(s) about {len(new_items)} new item(s)")
+
+
 def db_token(sa_json):
     from google.oauth2 import service_account
     import google.auth.transport.requests
@@ -241,8 +308,11 @@ def main():
 
     key = os.environ["MAILBRIEF_ACCESS_KEY"].strip()
     token = db_token(os.environ["FIREBASE_SERVICE_ACCOUNT"])
+
+    prev_ids = previous_attention_ids(key, token)
+
     req = urllib.request.Request(
-        f"{DB_URL}/briefs/{key}.json",
+        f"{DB_URL}/briefs/{key}/brief.json",
         data=json.dumps(brief).encode(),
         method="PUT",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
@@ -251,6 +321,12 @@ def main():
         resp.read()
     print(f"Published {len(all_items)} items "
           f"(attention {brief['counts']['attention']}, fyi {brief['counts']['fyi']}, junk {brief['counts']['junk']})")
+
+    if prev_ids is not None:
+        new_attention = [i for i in all_items
+                         if i["bucket"] == "attention" and item_id(i) not in prev_ids]
+        if new_attention:
+            notify_subscribers(new_attention, key, token)
 
 
 if __name__ == "__main__":

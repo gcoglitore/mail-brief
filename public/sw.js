@@ -17,6 +17,25 @@ self.addEventListener("activate", e => {
   );
 });
 
+self.addEventListener("push", e => {
+  let data = {};
+  try { data = e.data.json(); } catch (err) { /* no payload */ }
+  e.waitUntil(self.registration.showNotification(data.title || "Mail Brief", {
+    body: data.body || "New important email",
+    icon: "/icon-180.png",
+    badge: "/icon-180.png",
+    data: { url: data.url || "/" },
+  }));
+});
+
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  e.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
+    for (const c of list) { if ("focus" in c) return c.focus(); }
+    return clients.openWindow(e.notification.data.url || "/");
+  }));
+});
+
 // Network-first for our own pages (so updates arrive normally), cache fallback
 // when offline. Cross-origin requests (the database) pass through untouched —
 // the page handles those failures itself.
