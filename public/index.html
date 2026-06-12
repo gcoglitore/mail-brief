@@ -111,6 +111,7 @@
   }
   #readerActions { display: flex; gap: 14px; align-items: center; margin: 18px 0 8px; }
   .openLink { color: var(--blue); font-size: 13px; text-decoration: none; }
+  #readerDone { color: var(--green); border-color: var(--green); }
   .fyi .subj { color: var(--dim); }
   .fyi { opacity: .92; }
 
@@ -204,6 +205,7 @@
     </div>
     <div id="readerSubject"></div>
     <div id="readerActions">
+      <button class="replyBtn" id="readerDone" style="margin-top:0">✓ Done</button>
       <button class="replyBtn" id="readerReply" style="margin-top:0">Reply</button>
       <a class="openLink" id="readerOpen" target="_blank" rel="noopener">Open in mailbox ↗</a>
     </div>
@@ -334,6 +336,26 @@ function openReader(i) {
 function closeReader() {
   $("reader").style.display = "none";
   readerItem = null;
+}
+
+// "Done": mark read + archive on the mail server (out of the inbox), and drop
+// it from the list immediately. Because it leaves the server inbox, the next
+// refresh keeps it gone on every device.
+function archiveItem(i) {
+  if (!i) return;
+  if (BRIEF && BRIEF.items) {
+    BRIEF.items = BRIEF.items.filter(x => x !== i);
+    try { localStorage.setItem("mailbrief_cache", JSON.stringify(BRIEF)); } catch (e) {}
+  }
+  closeReader();
+  render();
+  if (!i.msgid) return; // demo/no-id items can't sync — they return on next refresh
+  const key = localStorage.getItem("mailbrief_key");
+  fetch(API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, action: "archive", account: i.account, msgid: i.msgid }),
+  }).catch(() => {});
 }
 
 function openCompose(i) {
@@ -534,11 +556,14 @@ function render() {
 }
 
 async function load(key, fromButton) {
-  let badKey = false;
+  let gotResponse = false, data = null;
   try {
     const r = await fetch(DB + "/briefs/" + encodeURIComponent(key) + "/brief.json");
-    const data = await r.json();
-    if (!data) { badKey = true; throw new Error("badkey"); }
+    gotResponse = true;
+    data = await r.json();
+  } catch (e) { /* network failure — handled below */ }
+
+  if (data) {
     BRIEF = data;
     localStorage.setItem("mailbrief_key", key);
     localStorage.setItem("mailbrief_cache", JSON.stringify(data));
@@ -548,29 +573,40 @@ async function load(key, fromButton) {
     updateNetBar(false);
     flushOutbox();
     return;
-  } catch (e) {
-    if (!badKey) {
-      // Network failure — fall back to the last brief we saw on this device.
-      const cached = localStorage.getItem("mailbrief_cache");
-      if (cached && localStorage.getItem("mailbrief_key")) {
-        try {
-          BRIEF = JSON.parse(cached);
-          $("keyScreen").style.display = "none";
-          $("app").style.display = "block";
-          render();
-          updateNetBar(true);
-          return;
-        } catch (e2) { /* corrupt cache — fall through */ }
-      }
-    }
-    if (fromButton) {
-      $("keyErr").textContent = badKey
-        ? "That key didn't open anything. Check it and try again."
-        : "No connection — try again when you're online.";
-    } else {
-      showKeyScreen();
-    }
   }
+
+  // No data this attempt. Fall back to the last brief we cached on this device.
+  const haveSavedKey = !!localStorage.getItem("mailbrief_key");
+  const cached = localStorage.getItem("mailbrief_cache");
+  if (cached && haveSavedKey) {
+    try {
+      BRIEF = JSON.parse(cached);
+      $("keyScreen").style.display = "none";
+      $("app").style.display = "block";
+      render();
+      updateNetBar(true);
+      return;
+    } catch (e2) { /* corrupt cache — fall through */ }
+  }
+
+  if (fromButton) {
+    $("keyErr").textContent = gotResponse
+      ? "That key didn't open anything. Check it and try again."
+      : "No connection — try again when you're online.";
+    return;
+  }
+
+  // Auto-load with a saved key but nothing to show yet: NEVER nag for the code.
+  // Stay in the app, show a quiet "connecting", and retry shortly.
+  if (haveSavedKey) {
+    $("keyScreen").style.display = "none";
+    $("app").style.display = "block";
+    updateNetBar(undefined, "Connecting…");
+    setTimeout(() => load(key, false), 4000);
+    return;
+  }
+
+  showKeyScreen();
 }
 
 function showKeyScreen() {
@@ -638,6 +674,7 @@ $("readerBack").addEventListener("click", closeReader);
   }, { passive: true });
 })();
 $("readerReply").addEventListener("click", () => { if (readerItem) openCompose(readerItem); });
+$("readerDone").addEventListener("click", () => { if (readerItem) archiveItem(readerItem); });
 
 $("composeSend").addEventListener("click", sendReply);
 $("composeCancel").addEventListener("click", closeCompose);

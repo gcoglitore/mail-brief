@@ -78,6 +78,49 @@ functions.http('sendReply', async (req, res) => {
     }
   }
 
+  if (action === 'archive') {
+    // "Done": mark \Seen and move the message out of the inbox (Gmail All Mail /
+    // Yahoo Archive). Reversible — nothing is deleted, just archived.
+    const acct = findAccount(String(account || ''));
+    if (!acct) return res.status(404).json({ error: 'account not connected' });
+    const id = String(msgid || '').replace(/[<>]/g, '').trim();
+    if (!id) return res.status(400).json({ error: 'msgid required' });
+    const isGmail = /gmail/i.test(acct.imapHost);
+    const client = new ImapFlow({
+      host: acct.imapHost, port: 993, secure: true,
+      auth: { user: acct.email, pass: acct.password }, logger: false,
+    });
+    try {
+      await client.connect();
+      // find the archive destination by its special-use flag, with a fallback
+      let dest = null;
+      try {
+        for (const b of await client.list()) {
+          if (isGmail && b.specialUse === '\\All') dest = b.path;
+          if (!isGmail && b.specialUse === '\\Archive') dest = b.path;
+        }
+      } catch (_) {}
+      if (!dest) dest = isGmail ? '[Gmail]/All Mail' : 'Archive';
+      let archived = false;
+      const lock = await client.getMailboxLock('INBOX');
+      try {
+        const uids = await client.search({ header: { 'message-id': id } }, { uid: true });
+        if (uids && uids.length) {
+          await client.messageFlagsAdd(uids, ['\\Seen'], { uid: true });
+          await client.messageMove(uids, dest, { uid: true });
+          archived = true;
+        }
+      } finally {
+        lock.release();
+      }
+      await client.logout();
+      return res.json({ ok: true, archived });
+    } catch (e) {
+      try { await client.close(); } catch (_) {}
+      return res.status(502).json({ error: 'imap: ' + ((e && e.message) || 'failed') });
+    }
+  }
+
   if (action === 'refresh') {
     // "Update now": kick the mail-check workflow immediately.
     const ghToken = process.env.GH_DISPATCH_TOKEN;
