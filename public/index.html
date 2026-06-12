@@ -619,6 +619,24 @@ async function updateNow() {
 $("updateBtn").addEventListener("click", updateNow);
 
 $("readerBack").addEventListener("click", closeReader);
+
+// Swipe horizontally (either direction) to go back from the reader — no tap needed.
+(function () {
+  const r = $("reader");
+  let sx = 0, sy = 0, tracking = false;
+  r.addEventListener("touchstart", e => {
+    if (e.touches.length !== 1) { tracking = false; return; }
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
+  }, { passive: true });
+  r.addEventListener("touchend", e => {
+    if (!tracking) return;
+    tracking = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    // a clear sideways flick (not a vertical scroll) returns to the list
+    if (Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy) * 1.5) closeReader();
+  }, { passive: true });
+})();
 $("readerReply").addEventListener("click", () => { if (readerItem) openCompose(readerItem); });
 
 $("composeSend").addEventListener("click", sendReply);
