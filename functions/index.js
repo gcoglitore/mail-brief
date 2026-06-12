@@ -36,6 +36,19 @@ function findAccount(label) {
   return null;
 }
 
+// Find a message's UIDs by its Message-ID. Gmail's IMAP ignores plain
+// HEADER MESSAGE-ID searches, so for Gmail use its native rfc822msgid: search;
+// fall back to the standard header search (works for Yahoo and others).
+async function findUids(client, isGmail, id) {
+  if (isGmail) {
+    try {
+      const u = await client.search({ gmailRaw: 'rfc822msgid:' + id }, { uid: true });
+      if (u && u.length) return u;
+    } catch (_) { /* fall through to header search */ }
+  }
+  return (await client.search({ header: { 'message-id': id } }, { uid: true })) || [];
+}
+
 functions.http('sendReply', async (req, res) => {
   // Browser calls are restricted to the Mail Brief site itself; the access
   // key (checked below) is the real gate for all callers.
@@ -48,30 +61,35 @@ functions.http('sendReply', async (req, res) => {
   const { key, account, to, subject, body, inReplyTo, references, action, msgid } = req.body || {};
   if (!keyOk(key)) return res.status(401).json({ error: 'bad key' });
 
-  if (action === 'markread') {
-    // Set the message \Seen on the real mail server so reading in the app also
-    // marks it read in Gmail/Yahoo. Best-effort and idempotent.
+  if (action === 'markread' || action === 'markallread') {
+    // Set \Seen on one message (markread) or many (markallread) so reading in
+    // the app marks them read in Gmail/Yahoo too. Best-effort and idempotent.
     const acct = findAccount(String(account || ''));
     if (!acct) return res.status(404).json({ error: 'account not connected' });
-    const id = String(msgid || '').replace(/[<>]/g, '').trim();
-    if (!id) return res.status(400).json({ error: 'msgid required' });
+    const ids = (action === 'markallread' ? (req.body.msgids || []) : [msgid])
+      .map(m => String(m || '').replace(/[<>]/g, '').trim()).filter(Boolean);
+    if (!ids.length) return res.status(400).json({ error: 'msgid(s) required' });
+    const isGmail = /gmail/i.test(acct.imapHost);
     const client = new ImapFlow({
       host: acct.imapHost, port: 993, secure: true,
       auth: { user: acct.email, pass: acct.password }, logger: false,
     });
     try {
       await client.connect();
+      let marked = 0;
       const lock = await client.getMailboxLock('INBOX');
       try {
-        const uids = await client.search({ header: { 'message-id': id } }, { uid: true });
-        if (uids && uids.length) {
-          await client.messageFlagsAdd(uids, ['\\Seen'], { uid: true });
+        const all = [];
+        for (const id of ids) {
+          const uids = await findUids(client, isGmail, id);
+          if (uids && uids.length) all.push(...uids);
         }
+        if (all.length) { await client.messageFlagsAdd(all, ['\\Seen'], { uid: true }); marked = all.length; }
       } finally {
         lock.release();
       }
       await client.logout();
-      return res.json({ ok: true });
+      return res.json({ ok: true, marked });
     } catch (e) {
       try { await client.close(); } catch (_) {}
       return res.status(502).json({ error: 'imap: ' + ((e && e.message) || 'failed') });
@@ -104,7 +122,7 @@ functions.http('sendReply', async (req, res) => {
       let archived = false;
       const lock = await client.getMailboxLock('INBOX');
       try {
-        const uids = await client.search({ header: { 'message-id': id } }, { uid: true });
+        const uids = await findUids(client, isGmail, id);
         if (uids && uids.length) {
           await client.messageFlagsAdd(uids, ['\\Seen'], { uid: true });
           await client.messageMove(uids, dest, { uid: true });

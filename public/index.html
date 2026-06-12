@@ -165,6 +165,9 @@
   .empty { color: var(--faint); font-size: 13px; padding: 8px 2px; }
 
   /* view tabs */
+  #mailTools { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+  #readAllBtn { padding: 5px 14px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--green); font-size: 12.5px; font-weight: 700; cursor: pointer; }
   #viewTabs { display: flex; gap: 8px; margin-bottom: 14px; }
   .vtab {
     flex: 1; padding: 9px 0; border-radius: 10px; border: 1px solid var(--line);
@@ -245,6 +248,7 @@
       <button id="tabMsg" class="vtab">Messages<span id="msgBadge"></span></button>
     </div>
     <div id="mailView">
+      <div id="mailTools"><button id="readAllBtn">✓ Mark all read</button></div>
       <div id="chips"></div>
       <div id="content"></div>
       <div id="accStatus"></div>
@@ -415,21 +419,61 @@ function closeReader() {
 // "Done": mark read + archive on the mail server (out of the inbox), and drop
 // it from the list immediately. Because it leaves the server inbox, the next
 // refresh keeps it gone on every device.
-function archiveItem(i) {
+async function archiveItem(i) {
   if (!i) return;
-  if (BRIEF && BRIEF.items) {
-    BRIEF.items = BRIEF.items.filter(x => x !== i);
+  const idx = BRIEF && BRIEF.items ? BRIEF.items.indexOf(i) : -1;
+  if (idx >= 0) {
+    BRIEF.items.splice(idx, 1);
     try { localStorage.setItem("mailbrief_cache", JSON.stringify(BRIEF)); } catch (e) {}
   }
   closeReader();
   render();
   if (!i.msgid) return; // demo/no-id items can't sync — they return on next refresh
   const key = localStorage.getItem("mailbrief_key");
-  fetch(API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key, action: "archive", account: i.account, msgid: i.msgid }),
-  }).catch(() => {});
+  let ok = false;
+  try {
+    const r = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, action: "archive", account: i.account, msgid: i.msgid }),
+    });
+    const d = await r.json().catch(() => ({}));
+    ok = r.ok && d.archived;
+  } catch (e) { /* offline */ }
+  if (!ok && idx >= 0 && BRIEF && BRIEF.items) {
+    // archive didn't take — put it back so the list tells the truth
+    BRIEF.items.splice(Math.min(idx, BRIEF.items.length), 0, i);
+    try { localStorage.setItem("mailbrief_cache", JSON.stringify(BRIEF)); } catch (e) {}
+    render();
+    updateNetBar(undefined, "Couldn't archive that one — still in your inbox");
+    setTimeout(() => updateNetBar(), 5000);
+  }
+}
+
+// Mark every shown unread email read — locally and on Gmail/Yahoo.
+async function markAllRead() {
+  if (!BRIEF || !BRIEF.items) return;
+  const byAccount = {};
+  let any = false;
+  BRIEF.items.forEach(i => {
+    if (i.unread && i.msgid) {
+      i.unread = false; any = true;
+      (byAccount[i.account] = byAccount[i.account] || []).push(i.msgid);
+    } else if (i.unread) { i.unread = false; any = true; }
+  });
+  if (!any) { updateNetBar(undefined, "Nothing unread"); setTimeout(() => updateNetBar(), 3000); return; }
+  try { localStorage.setItem("mailbrief_cache", JSON.stringify(BRIEF)); } catch (e) {}
+  render();
+  const key = localStorage.getItem("mailbrief_key");
+  Object.keys(byAccount).forEach(acct => {
+    fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, action: "markallread", account: acct, msgids: byAccount[acct] }),
+    }).catch(() => {});
+  });
+  updateNetBar(undefined, "✓ Marked all read");
+  setTimeout(() => updateNetBar(), 4000);
 }
 
 function openCompose(i) {
@@ -750,6 +794,7 @@ $("readerBack").addEventListener("click", closeReader);
 })();
 $("readerReply").addEventListener("click", () => { if (readerItem) openCompose(readerItem); });
 $("readerDone").addEventListener("click", () => { if (readerItem) archiveItem(readerItem); });
+$("readAllBtn").addEventListener("click", markAllRead);
 
 $("composeSend").addEventListener("click", sendReply);
 $("composeCancel").addEventListener("click", closeCompose);
