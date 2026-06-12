@@ -5,6 +5,7 @@
 // repo's GitHub secrets — the single place credentials are managed.
 const functions = require('@google-cloud/functions-framework');
 const nodemailer = require('nodemailer');
+const { ImapFlow } = require('imapflow');
 const crypto = require('crypto');
 
 const sentLog = []; // in-memory send timestamps; resets on cold start
@@ -26,6 +27,7 @@ function findAccount(label) {
     if (parts.length === 4 && parts[0].trim() === label) {
       return {
         email: parts[1].trim(),
+        imapHost: parts[2].trim(),
         smtpHost: parts[2].trim().replace(/^imap\./, 'smtp.'),
         password: parts[3].replace(/\s+/g, ''),
       };
@@ -43,8 +45,38 @@ functions.http('sendReply', async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(204).send('');
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
-  const { key, account, to, subject, body, inReplyTo, references, action } = req.body || {};
+  const { key, account, to, subject, body, inReplyTo, references, action, msgid } = req.body || {};
   if (!keyOk(key)) return res.status(401).json({ error: 'bad key' });
+
+  if (action === 'markread') {
+    // Set the message \Seen on the real mail server so reading in the app also
+    // marks it read in Gmail/Yahoo. Best-effort and idempotent.
+    const acct = findAccount(String(account || ''));
+    if (!acct) return res.status(404).json({ error: 'account not connected' });
+    const id = String(msgid || '').replace(/[<>]/g, '').trim();
+    if (!id) return res.status(400).json({ error: 'msgid required' });
+    const client = new ImapFlow({
+      host: acct.imapHost, port: 993, secure: true,
+      auth: { user: acct.email, pass: acct.password }, logger: false,
+    });
+    try {
+      await client.connect();
+      const lock = await client.getMailboxLock('INBOX');
+      try {
+        const uids = await client.search({ header: { 'message-id': id } }, { uid: true });
+        if (uids && uids.length) {
+          await client.messageFlagsAdd(uids, ['\\Seen'], { uid: true });
+        }
+      } finally {
+        lock.release();
+      }
+      await client.logout();
+      return res.json({ ok: true });
+    } catch (e) {
+      try { await client.close(); } catch (_) {}
+      return res.status(502).json({ error: 'imap: ' + ((e && e.message) || 'failed') });
+    }
+  }
 
   if (action === 'refresh') {
     // "Update now": kick the mail-check workflow immediately.

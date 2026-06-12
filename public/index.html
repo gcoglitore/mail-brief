@@ -258,7 +258,11 @@ function card(i, cls) {
   const hasBody = !!i.body;
   // Cards with full text are tap-to-expand containers; others link straight out.
   const node = el(hasBody || !link ? "div" : "a", "card" + (cls ? " " + cls : ""));
-  if (!hasBody && link) { node.href = link; node.target = "_blank"; node.rel = "noopener"; }
+  if (!hasBody && link) {
+    node.href = link; node.target = "_blank"; node.rel = "noopener";
+    // Opening it in Gmail/Yahoo counts as reading it — sync the read state.
+    node.addEventListener("click", () => markRead(i));
+  }
 
   const row = el("div", "row1");
   if (i.unread) row.appendChild(el("span", "unread"));
@@ -295,8 +299,25 @@ const API = "https://mail-brief-gio.web.app/api/send";
 let composeItem = null;
 let readerItem = null;
 
+// Mark an item read: update it locally (drops the blue dot, persists in the
+// device cache) and tell the server to set it read on Gmail/Yahoo too.
+function markRead(i) {
+  if (!i || !i.unread) return;
+  i.unread = false;
+  try { if (BRIEF) localStorage.setItem("mailbrief_cache", JSON.stringify(BRIEF)); } catch (e) {}
+  render();
+  if (!i.msgid) return; // no message id (e.g. demo data) — nothing to sync
+  const key = localStorage.getItem("mailbrief_key");
+  fetch(API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, action: "markread", account: i.account, msgid: i.msgid }),
+  }).catch(() => {}); // best-effort; the next refresh reconciles anyway
+}
+
 function openReader(i) {
   readerItem = i;
+  markRead(i);
   $("readerAcct").textContent = i.account;
   $("readerFrom").textContent = i.from_name || i.from_email || "?";
   $("readerAgo").textContent = ago(i.ts);
