@@ -49,6 +49,48 @@ async function findUids(client, isGmail, id) {
   return (await client.search({ header: { 'message-id': id } }, { uid: true })) || [];
 }
 
+// Gio's voice, for AI-drafted replies.
+const GIO_PERSONA =
+  "You draft replies AS Giovanni \"Gio\" Coglitore. He is founder/CEO of QLAD (a " +
+  "cybersecurity / national-security company) and is also involved with Sylabs and " +
+  "partners including Hitachi Ventures, Jabil, Matrice.ai, Divergent Space, DIU and the " +
+  "defense community. His voice: direct, concise, warm but no fluff, action-oriented — he " +
+  "gets to the point fast and is friendly with partners. He typically signs emails simply " +
+  "\"Gio\". For chat messages (Signal/Slack/iMessage) keep it short and casual with NO sign-off. " +
+  "Never invent facts, numbers, dates, or commitments; if a specific detail is needed but " +
+  "unknown, leave a short [bracketed placeholder]. Match the formality of the incoming message.";
+
+async function draftReplies(kind, sender, subject, bodyText, intent) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { error: 'AI drafting not set up — add the ANTHROPIC_API_KEY secret and redeploy' };
+  const user =
+    `Incoming ${kind === 'message' ? 'chat message' : 'email'}:\n` +
+    `From: ${sender || '?'}\n` + (subject ? `Subject: ${subject}\n` : '') +
+    `Message:\n${(bodyText || '').slice(0, 4000)}\n\n` +
+    (intent ? `Gio's intent for the reply: ${intent}\n\n` : '') +
+    `Write 3 ready-to-send reply options in Gio's voice, of varying tone (1: brief/affirmative, ` +
+    `2: a little more detailed, 3: a polite defer or a clarifying question). ` +
+    `${kind === 'message' ? 'Short and casual, no sign-off.' : 'Email style; sign as "Gio".'} ` +
+    `Reply with ONLY JSON: {"options":["...","...","..."]}`;
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 900,
+        system: GIO_PERSONA, messages: [{ role: 'user', content: user }] }),
+    });
+    const d = await r.json();
+    const text = d && d.content && d.content[0] && d.content[0].text;
+    if (!text) return { error: 'no draft returned' };
+    const m = text.match(/\{[\s\S]*\}/);
+    const opts = m ? JSON.parse(m[0]).options : null;
+    if (!Array.isArray(opts) || !opts.length) return { error: 'could not parse draft' };
+    return { options: opts.slice(0, 3).map(o => String(o).slice(0, 2000)) };
+  } catch (e) {
+    return { error: 'draft failed: ' + ((e && e.message) || 'unknown') };
+  }
+}
+
 functions.http('sendReply', async (req, res) => {
   // Browser calls are restricted to the Mail Brief site itself; the access
   // key (checked below) is the real gate for all callers.
@@ -60,6 +102,11 @@ functions.http('sendReply', async (req, res) => {
 
   const { key, account, to, subject, body, inReplyTo, references, action, msgid } = req.body || {};
   if (!keyOk(key)) return res.status(401).json({ error: 'bad key' });
+
+  if (action === 'draft') {
+    const out = await draftReplies(req.body.kind, req.body.sender, subject, body, req.body.intent);
+    return res.status(out.error ? 503 : 200).json(out.error ? out : { ok: true, options: out.options });
+  }
 
   if (action === 'markread' || action === 'markallread') {
     // Set \Seen on one message (markread) or many (markallread) so reading in
