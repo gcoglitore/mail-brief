@@ -82,7 +82,7 @@ async function draftReplies(kind, sender, subject, bodyText, intent) {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + orKey, 'Content-Type': 'application/json',
           'HTTP-Referer': 'https://mail-brief-gio.web.app', 'X-Title': 'Mail Brief' },
-        body: JSON.stringify({ model: 'anthropic/claude-fable-5', max_tokens: 600,
+        body: JSON.stringify({ model: 'anthropic/claude-haiku-4.5', max_tokens: 600,
           messages: [{ role: 'system', content: GIO_PERSONA }, { role: 'user', content: user }] }),
       });
       const d = await r.json();
