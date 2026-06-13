@@ -87,7 +87,7 @@ async function draftReplies(kind, sender, subject, bodyText, intent) {
       });
       const d = await r.json();
       text = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
-      if (!text) return { error: 'openrouter: ' + ((d && d.error && d.error.message) || JSON.stringify(d).slice(0, 220)) };
+      if (!text) return { error: 'openrouter: ' + JSON.stringify(d && d.error ? d.error : d).slice(0, 400) };
     } else {
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
