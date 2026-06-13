@@ -36,8 +36,8 @@ BEEPER = "http://localhost:23373"
 DB_URL = "https://mail-brief-gio-default-rtdb.firebaseio.com"
 HOME = os.path.expanduser("~")
 CHATDB = os.path.join(HOME, "Library/Messages/chat.db")
-LOOKBACK_DAYS = 14
-MAX_CHATS = 30
+LOOKBACK_DAYS = 30
+MAX_CHATS = 40
 MSGS_PER_CHAT = 15
 APPLE_EPOCH = 978307200  # 2001-01-01 in unix time
 
@@ -161,6 +161,48 @@ def apple_ts_to_epoch(d):
     return int(d / 1e9 + APPLE_EPOCH) if d > 1e12 else int(d + APPLE_EPOCH)
 
 
+def norm_handle(h):
+    if not h:
+        return ""
+    if "@" in h:
+        return h.strip().lower()
+    digits = re.sub(r"\D", "", h)
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+def load_contacts():
+    """Map phone/email → contact name from the Mac's Address Book (needs FDA)."""
+    import glob
+    names = {}
+    paths = glob.glob(os.path.join(HOME, "Library/Application Support/AddressBook/Sources/*/AddressBook-v22.abcddb"))
+    paths += glob.glob(os.path.join(HOME, "Library/Application Support/AddressBook/AddressBook-v22.abcddb"))
+    for p in paths:
+        try:
+            con = sqlite3.connect(f"file:{p}?mode=ro&immutable=1", uri=True)
+            rows = con.execute("""
+                SELECT r.ZFIRSTNAME, r.ZLASTNAME, r.ZORGANIZATION, ph.ZFULLNUMBER, em.ZADDRESS
+                FROM ZABCDRECORD r
+                LEFT JOIN ZABCDPHONENUMBER ph ON ph.ZOWNER = r.Z_PK
+                LEFT JOIN ZABCDEMAILADDRESS em ON em.ZOWNER = r.Z_PK
+            """).fetchall()
+            con.close()
+            for first, last, org, phone, email in rows:
+                name = (" ".join(x for x in (first, last) if x).strip()) or (org or "")
+                if not name:
+                    continue
+                if phone:
+                    names.setdefault(norm_handle(phone), name)
+                if email:
+                    names.setdefault(norm_handle(email), name)
+        except Exception:
+            continue
+    return names
+
+
+def display_name(handle, contacts):
+    return contacts.get(norm_handle(handle)) or handle
+
+
 def is_sendable_handle(ident):
     return bool(ident) and ("@" in ident or ident.startswith("+") or re.fullmatch(r"[0-9 ()\-+]{7,}", ident or ""))
 
@@ -178,7 +220,8 @@ def build_imessage_chats():
     con.row_factory = sqlite3.Row
     rows = con.execute("""
         SELECT c.ROWID AS chat_id, c.chat_identifier, c.display_name, c.style,
-               m.ROWID AS msg_id, m.text, m.attributedBody, m.is_from_me, m.date, h.id AS handle
+               m.ROWID AS msg_id, m.text, m.attributedBody, m.is_from_me, m.date,
+               m.service AS service, h.id AS handle
         FROM chat c
         JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
         JOIN message m ON m.ROWID = cmj.message_id
@@ -187,19 +230,20 @@ def build_imessage_chats():
         ORDER BY m.date DESC
     """, (since_apple_ns,)).fetchall()
     con.close()
+    contacts = load_contacts()
 
     chats = {}
     for r in rows:
         cid = r["chat_id"]
         ch = chats.setdefault(cid, {"identifier": r["chat_identifier"], "display": r["display_name"],
-                                    "group": r["style"] == 43, "msgs": []})
+                                    "group": r["style"] == 43, "service": r["service"] or "", "msgs": []})
         if len(ch["msgs"]) >= MSGS_PER_CHAT:
             continue
         text = r["text"] or attr_text(r["attributedBody"])
         if not text:
             continue
         ch["msgs"].append({"id": str(r["msg_id"]), "text": text[:2000], "ts": apple_ts_to_epoch(r["date"]),
-                           "sender": "You" if r["is_from_me"] else (r["handle"] or "?"),
+                           "sender": "You" if r["is_from_me"] else display_name(r["handle"], contacts),
                            "is_me": bool(r["is_from_me"]), "kind": "TEXT"})
 
     out = []
@@ -209,8 +253,9 @@ def build_imessage_chats():
         ch["msgs"].sort(key=lambda x: x["ts"])
         last = ch["msgs"][-1]
         ident = ch["identifier"] or ""
-        title = ch["display"] or ident or "(unknown)"
-        out.append({"id": "imsg:" + ident, "network": "imessage", "title": title,
+        net = "imessage" if str(ch["service"]).lower() == "imessage" else "sms"
+        title = ch["display"] or (display_name(ident, contacts) if not ch["group"] else ident) or "(unknown)"
+        out.append({"id": "imsg:" + ident, "network": net, "title": title,
                     "group": ch["group"], "unread": 0,  # chat.db read-state is unreliable; leave 0
                     "ts": last["ts"], "sendable": is_sendable_handle(ident) and not ch["group"],
                     "preview": ((("You: " if last["is_me"] else "") + last["text"]).strip() or "(no text)")[:140],

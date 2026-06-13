@@ -193,7 +193,8 @@
     white-space: nowrap; color: #fff; }
   .net.signal { background: #3a76f0; } .net.slack { background: #611f69; }
   .net.whatsapp { background: #25d366; color: #07331a; } .net.telegram { background: #2aabee; }
-  .net.imessage, .net.sms, .net.googlemessages { background: #34c759; color: #07331a; }
+  .net.imessage { background: #3a76f0; }
+  .net.sms, .net.googlemessages { background: #34c759; color: #07331a; }
   .net.instagram { background: #d6328f; } .net.x, .net.twitter { background: #222; }
   .net.generic { background: var(--faint); }
   .chatMid { flex: 1; min-width: 0; }
@@ -848,12 +849,14 @@ var MSGS = null;
 let threadChat = null;
 const NET_LABELS = [
   ["signal", "SIGNAL"], ["slack", "SLACK"], ["whatsapp", "WHATSAPP"],
-  ["telegram", "TELEGRAM"], ["imessage", "TEXT"], ["googlemessages", "TEXT"],
-  ["sms", "TEXT"], ["instagram", "INSTA"], ["twitter", "X"], ["discord", "DISCORD"],
+  ["telegram", "TELEGRAM"], ["imessage", "iMSG"], ["googlemessages", "SMS"],
+  ["sms", "SMS"], ["instagram", "INSTA"], ["twitter", "X"], ["discord", "DISCORD"],
 ];
 function netClass(n) {
   const s = (n || "").toLowerCase().replace(/[^a-z]/g, "");
-  for (const [k] of NET_LABELS) if (s.indexOf(k) !== -1) return k === "imessage" || k === "googlemessages" || k === "sms" ? "imessage" : k;
+  if (s.indexOf("imessage") !== -1) return "imessage";
+  if (s.indexOf("sms") !== -1 || s.indexOf("googlemessages") !== -1) return "sms";
+  for (const [k] of NET_LABELS) if (s.indexOf(k) !== -1) return k;
   return "generic";
 }
 function netLabel(n) {
