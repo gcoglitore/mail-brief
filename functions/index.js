@@ -82,7 +82,7 @@ async function draftReplies(kind, sender, subject, bodyText, intent) {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + orKey, 'Content-Type': 'application/json',
           'HTTP-Referer': 'https://mail-brief-gio.web.app', 'X-Title': 'Mail Brief' },
-        body: JSON.stringify({ model: 'anthropic/claude-fable-5', max_tokens: 900,
+        body: JSON.stringify({ model: 'anthropic/claude-fable-5', max_tokens: 600,
           messages: [{ role: 'system', content: GIO_PERSONA }, { role: 'user', content: user }] }),
       });
       const d = await r.json();
@@ -92,7 +92,7 @@ async function draftReplies(kind, sender, subject, bodyText, intent) {
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': anthKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 900,
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 600,
           system: GIO_PERSONA, messages: [{ role: 'user', content: user }] }),
       });
       const d = await r.json();
