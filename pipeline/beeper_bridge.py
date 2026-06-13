@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
-"""Mail Brief ↔ Beeper bridge.
+"""Mail Brief messages bridge — runs on the Mac, the "connector".
 
-Reads recent chats + messages from the local Beeper Desktop API (localhost:23373)
-and publishes a compact snapshot to the Mail Brief Realtime Database so the phone
-and desktop app can show Signal / Slack / WhatsApp / texts next to email.
+Pulls conversations from two sources and publishes one merged snapshot to the
+Realtime Database so the phone/desktop app shows them next to email:
 
-Also drains an outbox: replies the user writes in the app are queued in the DB;
-this bridge sends them through Beeper and clears them.
+  • Beeper Desktop API (Signal / Slack / WhatsApp / …) — needs ~/.beeper-token
+  • iMessage / SMS — read straight from this Mac's own Messages database
+    (~/Library/Messages/chat.db). No Apple-ID re-registration → no ban risk.
+    Requires Full Disk Access for whatever runs this script.
 
-Runs on the Mac (where Beeper Desktop lives) — same "connector" role as the mail
-pipeline. Local creds:
-  ~/.beeper-token        Beeper API token (Settings → Integrations → +)
-  ~/.mailbrief-sa.json   service-account key for DB writes
-  ~/.mailbrief_access_key the access key (path segment)
+Also drains an outbox: replies written in the app are queued in the DB; this
+sends them (Beeper API for Beeper chats, the Messages app for iMessage) and
+clears them. Outbox entries are routed by chat id — "imsg:" prefix = iMessage.
+
+Local creds: ~/.beeper-token, ~/.mailbrief-sa.json, ~/.mailbrief_access_key
 """
 
 import json
 import os
+import re
+import sqlite3
 import ssl
+import subprocess
 import time
 import urllib.parse
 import urllib.request
@@ -31,17 +35,23 @@ except ImportError:
 BEEPER = "http://localhost:23373"
 DB_URL = "https://mail-brief-gio-default-rtdb.firebaseio.com"
 HOME = os.path.expanduser("~")
-MAX_CHATS = 25
-MSGS_PER_CHAT = 12
-PREVIEW_LEN = 140
+CHATDB = os.path.join(HOME, "Library/Messages/chat.db")
+LOOKBACK_DAYS = 14
+MAX_CHATS = 30
+MSGS_PER_CHAT = 15
+APPLE_EPOCH = 978307200  # 2001-01-01 in unix time
 
 
+# ---------- Beeper ----------
 def beeper_token():
     t = os.environ.get("BEEPER_ACCESS_TOKEN", "").strip()
     if t:
         return t
-    with open(os.path.join(HOME, ".beeper-token")) as f:
-        return f.read().strip()
+    try:
+        with open(os.path.join(HOME, ".beeper-token")) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
 
 
 def beeper_get(path, token):
@@ -59,7 +69,6 @@ def beeper_post(path, token, payload):
 
 
 def items_of(resp):
-    """Beeper list endpoints wrap rows differently across versions — be liberal."""
     if isinstance(resp, list):
         return resp
     if isinstance(resp, dict):
@@ -67,14 +76,14 @@ def items_of(resp):
             v = resp.get(k)
             if isinstance(v, list):
                 return v
-            if isinstance(v, dict):  # e.g. {results:{messages:{items:[...]}}}
+            if isinstance(v, dict):
                 inner = items_of(v)
                 if inner:
                     return inner
     return []
 
 
-def to_epoch(ts):
+def iso_epoch(ts):
     if not ts:
         return 0
     try:
@@ -84,6 +93,143 @@ def to_epoch(ts):
         return 0
 
 
+def build_beeper_chats(token):
+    if not token:
+        return []
+    try:
+        chats = items_of(beeper_get(f"/v1/chats?limit={MAX_CHATS * 2}", token))
+    except Exception as exc:
+        print(f"Beeper unavailable: {exc}")
+        return []
+    chats = [c for c in chats if not c.get("isArchived")]
+    chats.sort(key=lambda c: iso_epoch(c.get("lastActivity")), reverse=True)
+    out = []
+    for c in chats[:MAX_CHATS]:
+        cid = c.get("id")
+        if not cid:
+            continue
+        msgs = []
+        try:
+            raw = items_of(beeper_get(
+                f"/v1/chats/{urllib.parse.quote(cid, safe='')}/messages?limit={MSGS_PER_CHAT}", token))
+            for m in raw:
+                msgs.append({"id": m.get("id"), "text": (m.get("text") or "")[:2000],
+                             "ts": iso_epoch(m.get("timestamp")),
+                             "sender": m.get("senderName") or ("You" if m.get("isSender") else "?"),
+                             "is_me": bool(m.get("isSender")), "kind": m.get("type") or "TEXT"})
+        except Exception:
+            pass
+        msgs.sort(key=lambda x: x["ts"])
+        last = msgs[-1] if msgs else {}
+        out.append({"id": cid, "network": c.get("network") or "", "title": c.get("title") or "(no title)",
+                    "group": c.get("type") == "group", "unread": int(c.get("unreadCount") or 0),
+                    "ts": iso_epoch(c.get("lastActivity")) or last.get("ts", 0),
+                    "preview": ((("You: " if last.get("is_me") else "") + (last.get("text") or "")).strip() or "(no text)")[:140],
+                    "messages": msgs})
+    return out
+
+
+# ---------- iMessage (local chat.db) ----------
+def attr_text(blob):
+    """Extract the visible text from a streamtyped NSAttributedString blob.
+    macOS Ventura+ stores message text here instead of the plain `text` column."""
+    if not blob:
+        return ""
+    try:
+        i = blob.find(b"NSString")
+        if i == -1:
+            return ""
+        plus = blob.find(b"\x2b", i)  # the '+' marker precedes the length-prefixed string
+        if plus == -1:
+            return ""
+        p = plus + 1
+        b0 = blob[p]
+        if b0 == 0x81:
+            ln = int.from_bytes(blob[p + 1:p + 3], "little"); start = p + 3
+        elif b0 == 0x82:
+            ln = int.from_bytes(blob[p + 1:p + 4], "little"); start = p + 4
+        else:
+            ln = b0; start = p + 1
+        return blob[start:start + ln].decode("utf-8", "replace")
+    except Exception:
+        return ""
+
+
+def apple_ts_to_epoch(d):
+    if not d:
+        return 0
+    return int(d / 1e9 + APPLE_EPOCH) if d > 1e12 else int(d + APPLE_EPOCH)
+
+
+def is_sendable_handle(ident):
+    return bool(ident) and ("@" in ident or ident.startswith("+") or re.fullmatch(r"[0-9 ()\-+]{7,}", ident or ""))
+
+
+def build_imessage_chats():
+    if not os.path.exists(CHATDB):
+        return []
+    since = int(time.time()) - LOOKBACK_DAYS * 86400
+    since_apple_ns = int((since - APPLE_EPOCH) * 1e9)
+    try:
+        con = sqlite3.connect(f"file:{CHATDB}?mode=ro&immutable=1", uri=True)
+    except sqlite3.OperationalError as exc:
+        print(f"iMessage db not readable (needs Full Disk Access): {exc}")
+        return []
+    con.row_factory = sqlite3.Row
+    rows = con.execute("""
+        SELECT c.ROWID AS chat_id, c.chat_identifier, c.display_name, c.style,
+               m.ROWID AS msg_id, m.text, m.attributedBody, m.is_from_me, m.date, h.id AS handle
+        FROM chat c
+        JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
+        JOIN message m ON m.ROWID = cmj.message_id
+        LEFT JOIN handle h ON h.ROWID = m.handle_id
+        WHERE m.date > ?
+        ORDER BY m.date DESC
+    """, (since_apple_ns,)).fetchall()
+    con.close()
+
+    chats = {}
+    for r in rows:
+        cid = r["chat_id"]
+        ch = chats.setdefault(cid, {"identifier": r["chat_identifier"], "display": r["display_name"],
+                                    "group": r["style"] == 43, "msgs": []})
+        if len(ch["msgs"]) >= MSGS_PER_CHAT:
+            continue
+        text = r["text"] or attr_text(r["attributedBody"])
+        if not text:
+            continue
+        ch["msgs"].append({"id": str(r["msg_id"]), "text": text[:2000], "ts": apple_ts_to_epoch(r["date"]),
+                           "sender": "You" if r["is_from_me"] else (r["handle"] or "?"),
+                           "is_me": bool(r["is_from_me"]), "kind": "TEXT"})
+
+    out = []
+    for cid, ch in chats.items():
+        if not ch["msgs"]:
+            continue
+        ch["msgs"].sort(key=lambda x: x["ts"])
+        last = ch["msgs"][-1]
+        ident = ch["identifier"] or ""
+        title = ch["display"] or ident or "(unknown)"
+        out.append({"id": "imsg:" + ident, "network": "imessage", "title": title,
+                    "group": ch["group"], "unread": 0,  # chat.db read-state is unreliable; leave 0
+                    "ts": last["ts"], "sendable": is_sendable_handle(ident) and not ch["group"],
+                    "preview": ((("You: " if last["is_me"] else "") + last["text"]).strip() or "(no text)")[:140],
+                    "messages": ch["msgs"]})
+    out.sort(key=lambda x: x["ts"], reverse=True)
+    return out[:MAX_CHATS]
+
+
+def send_imessage(handle, text):
+    script = ('on run {h, t}\n'
+              ' tell application "Messages"\n'
+              '  set svc to 1st service whose service type = iMessage\n'
+              '  send t to buddy h of svc\n'
+              ' end tell\n'
+              'end run')
+    subprocess.run(["osascript", "-e", script, handle, text], check=True, capture_output=True, timeout=25)
+
+
+# ---------- DB ----------
 def db_token():
     from google.oauth2 import service_account
     import google.auth.transport.requests
@@ -97,16 +243,13 @@ def db_token():
 
 def db_request(path, dbtok, method="GET", payload=None):
     req = urllib.request.Request(
-        DB_URL + path,
-        data=json.dumps(payload).encode() if payload is not None else None,
-        method=method,
-        headers={"Authorization": "Bearer " + dbtok, "Content-Type": "application/json"})
+        DB_URL + path, data=json.dumps(payload).encode() if payload is not None else None,
+        method=method, headers={"Authorization": "Bearer " + dbtok, "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=30, context=SSL_CTX) as resp:
         return json.loads(resp.read() or b"null")
 
 
 def drain_outbox(key, btok, dbtok):
-    """Send any replies the app queued, then clear them."""
     try:
         pending = db_request(f"/briefs/{key}/msg_outbox.json", dbtok) or {}
     except Exception:
@@ -119,56 +262,17 @@ def drain_outbox(key, btok, dbtok):
             db_request(f"/briefs/{key}/msg_outbox/{oid}.json", dbtok, method="DELETE")
             continue
         try:
-            beeper_post(f"/v1/chats/{urllib.parse.quote(chat_id, safe='')}/messages", btok, {"text": text})
+            if chat_id.startswith("imsg:"):
+                send_imessage(chat_id[5:], text)
+            elif btok:
+                beeper_post(f"/v1/chats/{urllib.parse.quote(chat_id, safe='')}/messages", btok, {"text": text})
+            else:
+                continue  # Beeper send needs a token we don't have yet — leave queued
             db_request(f"/briefs/{key}/msg_outbox/{oid}.json", dbtok, method="DELETE")
             sent += 1
         except Exception as exc:
             print(f"send failed for {chat_id}: {exc}")
     return sent
-
-
-def build_snapshot(btok):
-    chats = items_of(beeper_get(f"/v1/chats?limit={MAX_CHATS * 2}", btok))
-    chats = [c for c in chats if not c.get("isArchived")]
-    chats.sort(key=lambda c: to_epoch(c.get("lastActivity")), reverse=True)
-    chats = chats[:MAX_CHATS]
-
-    out = []
-    for c in chats:
-        cid = c.get("id")
-        if not cid:
-            continue
-        msgs = []
-        try:
-            raw = items_of(beeper_get(
-                f"/v1/chats/{urllib.parse.quote(cid, safe='')}/messages?limit={MSGS_PER_CHAT}", btok))
-            for m in raw:
-                msgs.append({
-                    "id": m.get("id"),
-                    "text": (m.get("text") or "")[:2000],
-                    "ts": to_epoch(m.get("timestamp")),
-                    "sender": m.get("senderName") or ("You" if m.get("isSender") else "?"),
-                    "is_me": bool(m.get("isSender")),
-                    "kind": m.get("type") or "TEXT",
-                })
-        except Exception as exc:
-            print(f"messages fetch failed for {cid}: {exc}")
-        msgs.sort(key=lambda x: x["ts"])
-        last = msgs[-1] if msgs else {}
-        out.append({
-            "id": cid,
-            "network": c.get("network") or "",
-            "title": c.get("title") or "(no title)",
-            "group": c.get("type") == "group",
-            "unread": int(c.get("unreadCount") or 0),
-            "ts": to_epoch(c.get("lastActivity")) or last.get("ts", 0),
-            "preview": ((("You: " if last.get("is_me") else "") + (last.get("text") or "")).strip()
-                        or "(no text)")[:PREVIEW_LEN],
-            "messages": msgs,
-        })
-    out.sort(key=lambda x: x["ts"], reverse=True)
-    return {"generated_at": int(time.time()), "chats": out,
-            "counts": {"unread": sum(c["unread"] for c in out), "chats": len(out)}}
 
 
 def main():
@@ -177,10 +281,14 @@ def main():
     dbtok = db_token()
 
     sent = drain_outbox(key, btok, dbtok)
-    snap = build_snapshot(btok)
+
+    chats = build_beeper_chats(btok) + build_imessage_chats()
+    chats.sort(key=lambda c: c.get("ts", 0), reverse=True)
+    snap = {"generated_at": int(time.time()), "chats": chats,
+            "counts": {"unread": sum(c.get("unread", 0) for c in chats), "chats": len(chats)}}
     db_request(f"/briefs/{key}/messages.json", dbtok, method="PUT", payload=snap)
-    print(f"published {snap['counts']['chats']} chats "
-          f"({snap['counts']['unread']} unread); sent {sent} queued reply(s)")
+    n_imsg = sum(1 for c in chats if c.get("network") == "imessage")
+    print(f"published {len(chats)} chats ({n_imsg} iMessage); sent {sent} queued reply(s)")
 
 
 if __name__ == "__main__":
