@@ -31,10 +31,11 @@ jobs:
           MAIL_ACCOUNT_6: ${{ secrets.MAIL_ACCOUNT_6 }}
           GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           python3 - <<'EOF'
           import json, os
-          keys = ["MAILBRIEF_ACCESS_KEY", "GH_DISPATCH_TOKEN", "ANTHROPIC_API_KEY"] + [f"MAIL_ACCOUNT_{n}" for n in range(1, 7)]
+          keys = ["MAILBRIEF_ACCESS_KEY", "GH_DISPATCH_TOKEN", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"] + [f"MAIL_ACCOUNT_{n}" for n in range(1, 7)]
           lines = [f"{k}: {json.dumps(v)}" for k in keys if (v := os.environ.get(k))]
           path = os.path.join(os.environ["RUNNER_TEMP"], "env.yaml")
           with open(path, "w") as f:

@@ -61,8 +61,11 @@ const GIO_PERSONA =
   "unknown, leave a short [bracketed placeholder]. Match the formality of the incoming message.";
 
 async function draftReplies(kind, sender, subject, bodyText, intent) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { error: 'AI drafting not set up — add the ANTHROPIC_API_KEY secret and redeploy' };
+  const orKey = process.env.OPENROUTER_API_KEY;   // preferred — one key, easy signup
+  const anthKey = process.env.ANTHROPIC_API_KEY;  // fallback — direct Anthropic
+  if (!orKey && !anthKey) {
+    return { error: 'AI drafting not set up — add an OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) secret and redeploy' };
+  }
   const user =
     `Incoming ${kind === 'message' ? 'chat message' : 'email'}:\n` +
     `From: ${sender || '?'}\n` + (subject ? `Subject: ${subject}\n` : '') +
@@ -73,14 +76,27 @@ async function draftReplies(kind, sender, subject, bodyText, intent) {
     `${kind === 'message' ? 'Short and casual, no sign-off.' : 'Email style; sign as "Gio".'} ` +
     `Reply with ONLY JSON: {"options":["...","...","..."]}`;
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 900,
-        system: GIO_PERSONA, messages: [{ role: 'user', content: user }] }),
-    });
-    const d = await r.json();
-    const text = d && d.content && d.content[0] && d.content[0].text;
+    let text;
+    if (orKey) {
+      const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + orKey, 'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://mail-brief-gio.web.app', 'X-Title': 'Mail Brief' },
+        body: JSON.stringify({ model: 'anthropic/claude-haiku-latest', max_tokens: 900,
+          messages: [{ role: 'system', content: GIO_PERSONA }, { role: 'user', content: user }] }),
+      });
+      const d = await r.json();
+      text = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
+    } else {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': anthKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 900,
+          system: GIO_PERSONA, messages: [{ role: 'user', content: user }] }),
+      });
+      const d = await r.json();
+      text = d && d.content && d.content[0] && d.content[0].text;
+    }
     if (!text) return { error: 'no draft returned' };
     const m = text.match(/\{[\s\S]*\}/);
     const opts = m ? JSON.parse(m[0]).options : null;
