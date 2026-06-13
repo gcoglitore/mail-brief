@@ -175,7 +175,10 @@
   #mailTools { display: flex; justify-content: flex-end; margin-bottom: 8px; }
   #readAllBtn { padding: 5px 14px; border-radius: 8px; border: 1px solid var(--line);
     background: var(--panel2); color: var(--green); font-size: 12.5px; font-weight: 700; cursor: pointer; }
-  #viewTabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  #viewTabs { display: flex; gap: 8px; margin-bottom: 10px; }
+  #searchBox { width: 100%; padding: 10px 14px; margin-bottom: 14px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 15px; }
+  #searchBox::placeholder { color: var(--faint); }
   .vtab {
     flex: 1; padding: 9px 0; border-radius: 10px; border: 1px solid var(--line);
     background: var(--panel); color: var(--dim); font-size: 14px; font-weight: 700; cursor: pointer;
@@ -255,6 +258,7 @@
       <button id="tabMail" class="vtab on">Mail</button>
       <button id="tabMsg" class="vtab">Messages<span id="msgBadge"></span></button>
     </div>
+    <input id="searchBox" type="search" placeholder="Search…" autocomplete="off">
     <div id="mailView">
       <div id="mailTools"><button id="readAllBtn">✓ Mark all read</button></div>
       <div id="chips"></div>
@@ -322,6 +326,16 @@
 const DB = "https://mail-brief-gio-default-rtdb.firebaseio.com";
 let BRIEF = null;
 let FILTER = "ALL";
+let SEARCH = "";
+
+// Case-insensitive: does the (already-lowercased) query appear in any field?
+function matchText(q) {
+  for (let n = 1; n < arguments.length; n++) {
+    const f = arguments[n];
+    if (f && String(f).toLowerCase().indexOf(q) !== -1) return true;
+  }
+  return false;
+}
 
 const $ = id => document.getElementById(id);
 
@@ -643,29 +657,35 @@ function render() {
 
   const content = $("content");
   content.replaceChildren();
-  section(content, "NEEDS ATTENTION", "var(--red)", attn, "attn", "Nothing needs your attention.");
-  section(content, "FYI", "var(--blue)", fyi, "fyi", "Nothing here.");
 
-  const junkHead = el("div", "secHead");
-  const jdot = el("span", "dot"); jdot.style.background = "var(--faint)";
-  junkHead.appendChild(jdot);
-  junkHead.appendChild(document.createTextNode("JUNK "));
-  junkHead.appendChild(el("span", "count", "(" + junk.length + ")"));
-  content.appendChild(junkHead);
+  if (SEARCH) {
+    const matches = items.filter(i => matchText(SEARCH, i.from_name, i.from_email, i.subject, i.snippet, i.body));
+    section(content, "RESULTS", "var(--gold)", matches, "", "No matching email.");
+  } else {
+    section(content, "NEEDS ATTENTION", "var(--red)", attn, "attn", "Nothing needs your attention.");
+    section(content, "FYI", "var(--blue)", fyi, "fyi", "Nothing here.");
 
-  const senders = [...new Set(junk.map(j => j.from_name))].slice(0, 6).join(", ");
-  const junkBar = el("div", null,
-    junk.length + " junk emails kept out of your way" + (senders ? " — " + senders : "") + " (tap to view)");
-  junkBar.id = "junkBar";
-  const junkList = el("div");
-  junkList.id = "junkList";
-  junk.forEach(i => junkList.appendChild(card(i, "")));
-  junkBar.appendChild(junkList);
-  junkBar.addEventListener("click", e => {
-    if (e.target.closest("a")) return;
-    junkList.style.display = junkList.style.display === "block" ? "none" : "block";
-  });
-  content.appendChild(junkBar);
+    const junkHead = el("div", "secHead");
+    const jdot = el("span", "dot"); jdot.style.background = "var(--faint)";
+    junkHead.appendChild(jdot);
+    junkHead.appendChild(document.createTextNode("JUNK "));
+    junkHead.appendChild(el("span", "count", "(" + junk.length + ")"));
+    content.appendChild(junkHead);
+
+    const senders = [...new Set(junk.map(j => j.from_name))].slice(0, 6).join(", ");
+    const junkBar = el("div", null,
+      junk.length + " junk emails kept out of your way" + (senders ? " — " + senders : "") + " (tap to view)");
+    junkBar.id = "junkBar";
+    const junkList = el("div");
+    junkList.id = "junkList";
+    junk.forEach(i => junkList.appendChild(card(i, "")));
+    junkBar.appendChild(junkList);
+    junkBar.addEventListener("click", e => {
+      if (e.target.closest("a")) return;
+      junkList.style.display = junkList.style.display === "block" ? "none" : "block";
+    });
+    content.appendChild(junkBar);
+  }
 
   const gen = BRIEF.generated_at || 0;
   const mins = Math.floor(Date.now() / 1000 - gen) / 60;
@@ -886,9 +906,13 @@ async function loadMessages() {
 function renderMessages() {
   const v = $("msgView");
   v.replaceChildren();
-  const chats = (MSGS && MSGS.chats) || [];
+  let chats = (MSGS && MSGS.chats) || [];
+  if (SEARCH) {
+    chats = chats.filter(c => matchText(SEARCH, c.title, c.preview) ||
+      (c.messages || []).some(m => matchText(SEARCH, m.text)));
+  }
   if (!chats.length) {
-    v.appendChild(el("div", "empty", MSGS ? "No conversations yet." : "Connecting to your messages…"));
+    v.appendChild(el("div", "empty", !MSGS ? "Connecting to your messages…" : (SEARCH ? "No matching conversations." : "No conversations yet.")));
     return;
   }
   chats.forEach(c => {
@@ -958,11 +982,16 @@ function switchView(which) {
   $("msgView").style.display = mail ? "none" : "block";
   $("tabMail").classList.toggle("on", mail);
   $("tabMsg").classList.toggle("on", !mail);
-  if (!mail) loadMessages();
+  if (mail) { if (BRIEF) render(); } else loadMessages();
 }
 
 $("tabMail").addEventListener("click", () => switchView("mail"));
 $("tabMsg").addEventListener("click", () => switchView("msg"));
+$("searchBox").addEventListener("input", e => {
+  SEARCH = e.target.value.trim().toLowerCase();
+  if ($("mailView").style.display !== "none") { if (BRIEF) render(); }
+  else renderMessages();
+});
 $("threadBack").addEventListener("click", closeThread);
 $("threadSend").addEventListener("click", sendMessage);
 $("threadInput").addEventListener("keydown", e => { if (e.key === "Enter") sendMessage(); });
