@@ -329,6 +329,19 @@ def main():
 
     chats = build_beeper_chats(btok) + build_imessage_chats()
     chats.sort(key=lambda c: c.get("ts", 0), reverse=True)
+
+    # Never wipe good data: if this run found nothing (e.g. no Full Disk Access,
+    # or Beeper/Messages momentarily unavailable), keep what's already published
+    # instead of overwriting it with an empty list.
+    if not chats:
+        try:
+            existing = db_request(f"/briefs/{key}/messages.json", dbtok)
+            if existing and existing.get("chats"):
+                print(f"0 chats this run — keeping {len(existing['chats'])} already published (no overwrite)")
+                return
+        except Exception:
+            pass
+
     snap = {"generated_at": int(time.time()), "chats": chats,
             "counts": {"unread": sum(c.get("unread", 0) for c in chats), "chats": len(chats)}}
     db_request(f"/briefs/{key}/messages.json", dbtok, method="PUT", payload=snap)
