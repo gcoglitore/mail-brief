@@ -337,6 +337,14 @@ function matchText(q) {
   return false;
 }
 
+// Show the unread-email count on the home-screen icon (iOS/Android app badge).
+function updateAppBadge() {
+  if (!("setAppBadge" in navigator)) return;
+  const n = (BRIEF && BRIEF.items) ? BRIEF.items.filter(i => i.unread).length : 0;
+  if (n > 0) navigator.setAppBadge(n).catch(() => {});
+  else navigator.clearAppBadge().catch(() => {});
+}
+
 const $ = id => document.getElementById(id);
 
 function el(tag, className, text) {
@@ -701,6 +709,8 @@ function render() {
     st.appendChild(span);
     st.appendChild(document.createTextNode("   "));
   });
+
+  updateAppBadge();
 }
 
 async function load(key, fromButton) {
