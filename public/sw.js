@@ -20,6 +20,11 @@ self.addEventListener("activate", e => {
 self.addEventListener("push", e => {
   let data = {};
   try { data = e.data.json(); } catch (err) { /* no payload */ }
+  // Update the home-screen icon's unread count even while the app is closed.
+  if (typeof data.unread === "number" && "setAppBadge" in self.navigator) {
+    if (data.unread > 0) self.navigator.setAppBadge(data.unread).catch(() => {});
+    else self.navigator.clearAppBadge().catch(() => {});
+  }
   e.waitUntil(self.registration.showNotification(data.title || "Mail Brief", {
     body: data.body || "New important email",
     icon: "/icon-180.png",

@@ -220,7 +220,7 @@ def previous_attention_ids(key, token):
         return None
 
 
-def notify_subscribers(new_items, key, token):
+def notify_subscribers(new_items, key, token, unread=None):
     """Web-push a buzz to every subscribed device about newly arrived attention mail."""
     pem_path = os.environ.get("VAPID_PEM_PATH")
     claim = os.environ.get("VAPID_SUB")
@@ -242,8 +242,11 @@ def notify_subscribers(new_items, key, token):
     else:
         title = f"{len(new_items)} important emails"
         body = "; ".join(i["from_name"] for i in new_items[:4])
-    payload = json.dumps({"title": title[:80], "body": body[:180],
-                          "url": "https://mail-brief-gio.web.app"})
+    payload_obj = {"title": title[:80], "body": body[:180],
+                   "url": "https://mail-brief-gio.web.app"}
+    if unread is not None:
+        payload_obj["unread"] = int(unread)  # updates the home-screen icon badge
+    payload = json.dumps(payload_obj)
     sent = 0
     for sid, rec in subs.items():
         sub = (rec or {}).get("sub")
@@ -343,7 +346,8 @@ def main():
         new_attention = [i for i in all_items
                          if i["bucket"] == "attention" and item_id(i) not in prev_ids]
         if new_attention:
-            notify_subscribers(new_attention, key, token)
+            unread_total = sum(1 for i in all_items if i.get("unread"))
+            notify_subscribers(new_attention, key, token, unread=unread_total)
 
 
 if __name__ == "__main__":

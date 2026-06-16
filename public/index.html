@@ -328,16 +328,6 @@ let BRIEF = null;
 let FILTER = "ALL";
 let SEARCH = "";
 
-// Put the unread email count on the home-screen icon as a red badge (iOS 16.4+
-// installed PWA, with notifications allowed). Clears to no badge when all read.
-function updateAppBadge() {
-  try {
-    if (!("setAppBadge" in navigator)) return;
-    const n = (BRIEF && BRIEF.items) ? BRIEF.items.filter(i => i.unread).length : 0;
-    if (n > 0) navigator.setAppBadge(n); else navigator.clearAppBadge();
-  } catch (e) {}
-}
-
 // Case-insensitive: does the (already-lowercased) query appear in any field?
 function matchText(q) {
   for (let n = 1; n < arguments.length; n++) {
@@ -345,14 +335,6 @@ function matchText(q) {
     if (f && String(f).toLowerCase().indexOf(q) !== -1) return true;
   }
   return false;
-}
-
-// Show the unread-email count on the home-screen icon (iOS/Android app badge).
-function updateAppBadge() {
-  if (!("setAppBadge" in navigator)) return;
-  const n = (BRIEF && BRIEF.items) ? BRIEF.items.filter(i => i.unread).length : 0;
-  if (n > 0) navigator.setAppBadge(n).catch(() => {});
-  else navigator.clearAppBadge().catch(() => {});
 }
 
 const $ = id => document.getElementById(id);
@@ -657,8 +639,17 @@ function section(parent, label, color, items, cls, emptyText) {
   }
 }
 
+// Push the unread email count to the iPhone home-screen badge (the red number
+// on the app icon). Works on installed PWAs once notifications are allowed.
+function updateAppBadge() {
+  if (!("setAppBadge" in navigator)) return;
+  const n = (BRIEF && BRIEF.items) ? BRIEF.items.filter(i => i.unread).length : 0;
+  (n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
+}
+
 function render() {
   if (!BRIEF) return;
+  updateAppBadge();
   const all = BRIEF.items || [];
   const items = all.filter(i => FILTER === "ALL" || i.account === FILTER);
   const attn = items.filter(i => i.bucket === "attention");
