@@ -328,6 +328,16 @@ let BRIEF = null;
 let FILTER = "ALL";
 let SEARCH = "";
 
+// Put the unread email count on the home-screen icon as a red badge (iOS 16.4+
+// installed PWA, with notifications allowed). Clears to no badge when all read.
+function updateAppBadge() {
+  try {
+    if (!("setAppBadge" in navigator)) return;
+    const n = (BRIEF && BRIEF.items) ? BRIEF.items.filter(i => i.unread).length : 0;
+    if (n > 0) navigator.setAppBadge(n); else navigator.clearAppBadge();
+  } catch (e) {}
+}
+
 // Case-insensitive: does the (already-lowercased) query appear in any field?
 function matchText(q) {
   for (let n = 1; n < arguments.length; n++) {
