@@ -157,44 +157,53 @@ def fetch_account(label, addr, host, password):
     since = time.strftime("%d-%b-%Y", time.gmtime(time.time() - LOOKBACK_DAYS * 86400))
     _, data = box.search(None, f"(SINCE {since})")
     ids = data[0].split()[-MAX_PER_ACCOUNT:]
+    skipped = 0
     for mid in reversed(ids):
-        _, msg_data = box.fetch(mid, "(RFC822 FLAGS)")
-        raw = b""
-        flags = ""
-        for part in msg_data:
-            if isinstance(part, tuple):
-                raw = part[1]
-                flags += part[0].decode(errors="replace")
-            elif isinstance(part, bytes):
-                flags += part.decode(errors="replace")
-        msg = email.message_from_bytes(raw)
-        from_name, from_email = email.utils.parseaddr(decode_header(msg.get("From")))
-        date_ts = email.utils.parsedate_to_datetime(msg.get("Date")).timestamp() if msg.get("Date") else time.time()
-        msgid = (msg.get("Message-ID") or "").strip("<> ")
-        if "gmail" in host:
-            link = f"https://mail.google.com/mail/u/{addr}/#search/rfc822msgid%3A{urllib.parse.quote(msgid)}"
-        else:
-            link = "https://mail.yahoo.com/d/folders/1"
-        headers = {k: msg.get(k, "") for k in ("List-Unsubscribe", "Precedence")}
-        reply_to = email.utils.parseaddr(decode_header(msg.get("Reply-To") or msg.get("From")))[1]
-        refs = " ".join((msg.get("References") or "").split()[-5:])
-        text = extract_text(msg)
-        item = {
-            "account": label,
-            "from_name": from_name or from_email,
-            "from_email": from_email,
-            "subject": decode_header(msg.get("Subject")) or "(no subject)",
-            "snippet": re.sub(r"\s+", " ", text)[:SNIPPET_LEN],
-            "body": text[:BODY_LEN],
-            "ts": int(date_ts),
-            "unread": "\\Seen" not in flags,
-            "link": link,
-            "msgid": msgid,
-            "reply_to": reply_to,
-            "references": refs,
-        }
-        item["bucket"] = heuristic_bucket(item, headers)
-        items.append(item)
+        # Isolate per-message failures: one malformed/undecodable email must not
+        # abort the whole account (which would then look "failed" and lose all mail).
+        try:
+            _, msg_data = box.fetch(mid, "(RFC822 FLAGS)")
+            raw = b""
+            flags = ""
+            for part in msg_data:
+                if isinstance(part, tuple):
+                    raw = part[1]
+                    flags += part[0].decode(errors="replace")
+                elif isinstance(part, bytes):
+                    flags += part.decode(errors="replace")
+            msg = email.message_from_bytes(raw)
+            from_name, from_email = email.utils.parseaddr(decode_header(msg.get("From")))
+            date_ts = email.utils.parsedate_to_datetime(msg.get("Date")).timestamp() if msg.get("Date") else time.time()
+            msgid = (msg.get("Message-ID") or "").strip("<> ")
+            if "gmail" in host:
+                link = f"https://mail.google.com/mail/u/{addr}/#search/rfc822msgid%3A{urllib.parse.quote(msgid)}"
+            else:
+                link = "https://mail.yahoo.com/d/folders/1"
+            headers = {k: msg.get(k, "") for k in ("List-Unsubscribe", "Precedence")}
+            reply_to = email.utils.parseaddr(decode_header(msg.get("Reply-To") or msg.get("From")))[1]
+            refs = " ".join((msg.get("References") or "").split()[-5:])
+            text = extract_text(msg)
+            item = {
+                "account": label,
+                "from_name": from_name or from_email,
+                "from_email": from_email,
+                "subject": decode_header(msg.get("Subject")) or "(no subject)",
+                "snippet": re.sub(r"\s+", " ", text)[:SNIPPET_LEN],
+                "body": text[:BODY_LEN],
+                "ts": int(date_ts),
+                "unread": "\\Seen" not in flags,
+                "link": link,
+                "msgid": msgid,
+                "reply_to": reply_to,
+                "references": refs,
+            }
+            item["bucket"] = heuristic_bucket(item, headers)
+            items.append(item)
+        except Exception as exc:
+            skipped += 1
+            print(f"  {label}: skipped a malformed message ({str(exc)[:100]})")
+    if skipped:
+        print(f"  {label}: {skipped} message(s) skipped, {len(items)} kept")
     box.logout()
     return items
 
@@ -317,6 +326,31 @@ def main():
         if i["bucket"] == "junk":
             i.pop("body", None)
 
+    key = os.environ["MAILBRIEF_ACCESS_KEY"].strip()
+    token = db_token(os.environ["FIREBASE_SERVICE_ACCOUNT"])
+
+    # Fetch the previously published brief once — reused for both the failed-account
+    # merge below and the attention diff for push notifications.
+    try:
+        prev = db_get(f"/briefs/{key}/brief.json", token)
+    except Exception:
+        prev = None
+
+    # DATA-LOSS GUARD: if an account failed to log in this run, keep its mail from
+    # the last brief (flagged stale) rather than dropping it. A transient IMAP
+    # hiccup on one account must never erase that account's inbox from the app.
+    failed_labels = {s["account"] for s in statuses if not s.get("ok")}
+    if failed_labels and isinstance(prev, dict) and isinstance(prev.get("items"), list):
+        fresh_ids = {item_id(i) for i in all_items}
+        kept = 0
+        for i in prev["items"]:
+            if i.get("account") in failed_labels and item_id(i) not in fresh_ids:
+                i["stale"] = True
+                all_items.append(i)
+                kept += 1
+        if kept:
+            print(f"Preserved {kept} stale item(s) from failed account(s): {', '.join(sorted(failed_labels))}")
+
     all_items.sort(key=lambda i: i["ts"], reverse=True)
     brief = {
         "generated_at": int(time.time()),
@@ -326,10 +360,8 @@ def main():
                    for b in ("attention", "fyi", "junk")},
     }
 
-    key = os.environ["MAILBRIEF_ACCESS_KEY"].strip()
-    token = db_token(os.environ["FIREBASE_SERVICE_ACCOUNT"])
-
-    prev_ids = previous_attention_ids(key, token)
+    prev_ids = ({item_id(i) for i in prev.get("items", []) if i.get("bucket") == "attention"}
+                if isinstance(prev, dict) else None)
 
     req = urllib.request.Request(
         f"{DB_URL}/briefs/{key}/brief.json",

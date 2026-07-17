@@ -4,3 +4,12 @@ node_modules/
 .firebase/
 *-sa.json
 service-account*.json
+
+# Python
+__pycache__/
+*.pyc
+
+# scratch/logs
+*.log
+.refresh-trigger.log
+.messages-cron.log

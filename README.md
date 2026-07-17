@@ -8,7 +8,8 @@ junk buried. Seventh member of the Brief family.
 ## How it works
 
 ```
-GitHub Actions (every 30 min)
+Local launchd timer (every 5 min while the Mac is on) → triggers GitHub Actions
+  (GitHub's own cron is a throttled Mac-off fallback)
   └─ pipeline/refresh_mail.py
        ├─ fetches recent inbox mail from each account over IMAP
        ├─ classifies: attention / fyi / junk  (Claude if ANTHROPIC_API_KEY set,
