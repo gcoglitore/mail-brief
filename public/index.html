@@ -45,6 +45,33 @@
     display: none; margin-bottom: 12px; padding: 9px 13px; border-radius: 10px;
     font-size: 13px; background: var(--panel2); border: 1px solid var(--line); color: var(--gold);
   }
+  /* Command-center daily brief */
+  #briefStrip { display: none; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .statCell { flex: 1 1 0; min-width: 74px; padding: 11px 12px; border-radius: 12px;
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--faint); }
+  .statCell .statN { font-size: 22px; font-weight: 800; line-height: 1.1; color: var(--text); }
+  .statCell .statL { font-size: 11px; color: var(--dim); margin-top: 3px; letter-spacing: .3px; }
+  .statCell.tone-gold { border-left-color: var(--gold); }
+  .statCell.tone-gold  .statN { color: var(--gold); }
+  .statCell.tone-blue  { border-left-color: var(--blue); }
+  .statCell.tone-red   { border-left-color: var(--red); }
+  .statCell.tone-red   .statN { color: var(--red); }
+  .statCell.tone-gray  { border-left-color: var(--faint); }
+  /* Undo / sync toast */
+  #toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(16px);
+    opacity: 0; pointer-events: none; transition: opacity .18s ease, transform .18s ease;
+    display: flex; align-items: center; gap: 13px; max-width: 92vw; z-index: 40;
+    padding: 11px 16px; border-radius: 12px; font-size: 14px; color: var(--text);
+    background: var(--panel); border: 1px solid var(--line); box-shadow: 0 10px 34px rgba(0,0,0,.5); }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+  #toast .tState { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--faint); }
+  #toast.state-ok .tState { background: var(--green); }
+  #toast.state-send .tState { background: var(--gold); animation: tpulse 1s infinite; }
+  #toast.state-fail .tState { background: var(--red); }
+  #toast.state-offline .tState { background: var(--faint); }
+  @keyframes tpulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+  #toast .tUndo { color: var(--gold); font-weight: 800; cursor: pointer; background: none;
+    border: 0; font-size: 14px; padding: 2px 4px; }
 
   #keyScreen { display: none; text-align: center; padding: 80px 20px; }
   #keyScreen h2 { font-size: 17px; margin-bottom: 6px; }
@@ -285,6 +312,7 @@
     </div>
     <input id="searchBox" type="search" placeholder="Search…" autocomplete="off">
     <div id="mailView">
+      <div id="briefStrip"></div>
       <div id="mailTools"><button id="readAllBtn">✓ Mark all read</button></div>
       <div id="chips"></div>
       <div id="content"></div>
@@ -332,6 +360,8 @@
 <div id="deskPane">
   <div><span class="dpIcon">✉️</span>Select an email or conversation<br>to read it here.</div>
 </div>
+
+<div id="toast"></div>
 
 <div id="composeWrap">
   <div id="composeSheet">
@@ -470,37 +500,76 @@ function closeReader() {
   readerItem = null;
 }
 
-// "Done": mark read + archive on the mail server (out of the inbox), and drop
-// it from the list immediately. Because it leaves the server inbox, the next
-// refresh keeps it gone on every device.
-async function archiveItem(i) {
-  if (!i) return;
-  const idx = BRIEF && BRIEF.items ? BRIEF.items.indexOf(i) : -1;
-  if (idx >= 0) {
-    BRIEF.items.splice(idx, 1);
-    try { localStorage.setItem("mailbrief_cache", JSON.stringify(BRIEF)); } catch (e) {}
+// ===== Undo / sync-state toast =====
+let toastTimer = null, toastExpireFn = null;
+function hideToast(runExpire) {
+  if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+  const fn = toastExpireFn; toastExpireFn = null;
+  $("toast").classList.remove("show");
+  if (runExpire && fn) fn();
+}
+// showToast(msg, { undo, onExpire, ms, state }) — state: ok|send|fail|offline
+function showToast(msg, opts) {
+  opts = opts || {};
+  hideToast(true); // commit any pending action before replacing the toast
+  const t = $("toast");
+  t.replaceChildren();
+  t.className = "state-" + (opts.state || "ok");
+  t.appendChild(el("span", "tState"));
+  t.appendChild(el("span", "tMsg", msg));
+  if (opts.undo) {
+    const b = el("button", "tUndo", "Undo");
+    b.addEventListener("click", () => { hideToast(false); opts.undo(); });
+    t.appendChild(b);
   }
+  t.classList.add("show");
+  toastExpireFn = opts.onExpire || null;
+  toastTimer = setTimeout(() => hideToast(true), opts.ms || (opts.undo ? 6000 : 2400));
+}
+function cacheBrief() { try { localStorage.setItem("mailbrief_cache", JSON.stringify(BRIEF)); } catch (e) {} }
+
+// "Done": remove immediately and show "Archived — Undo". The real archive on the
+// mail server is deferred until the undo window closes, so Undo needs no server
+// round-trip. Sync state is shown live; a server failure rolls the item back.
+function archiveItem(i) {
+  if (!i || !BRIEF || !BRIEF.items) return;
+  const idx = BRIEF.items.indexOf(i);
+  if (idx < 0) return;
+  BRIEF.items.splice(idx, 1);
+  cacheBrief();
   closeReader();
   render();
-  if (!i.msgid) return; // demo/no-id items can't sync — they return on next refresh
+  showToast("Archived", {
+    state: "ok", ms: 6000,
+    undo: () => {                       // nothing sent yet — just restore it
+      BRIEF.items.splice(Math.min(idx, BRIEF.items.length), 0, i);
+      cacheBrief(); render();
+    },
+    onExpire: () => commitArchive(i, idx),
+  });
+}
+
+async function commitArchive(i, idx) {
+  if (!i.msgid) return;                  // demo/no-id items can't sync
   const key = localStorage.getItem("mailbrief_key");
+  showToast("Archiving…", { state: "send", ms: 8000 });
   let ok = false;
   try {
     const r = await fetch(API, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key, action: "archive", account: i.account, msgid: i.msgid }),
     });
     const d = await r.json().catch(() => ({}));
     ok = r.ok && d.archived;
   } catch (e) { /* offline */ }
-  if (!ok && idx >= 0 && BRIEF && BRIEF.items) {
-    // archive didn't take — put it back so the list tells the truth
-    BRIEF.items.splice(Math.min(idx, BRIEF.items.length), 0, i);
-    try { localStorage.setItem("mailbrief_cache", JSON.stringify(BRIEF)); } catch (e) {}
-    render();
-    updateNetBar(undefined, "Couldn't archive that one — still in your inbox");
-    setTimeout(() => updateNetBar(), 5000);
+  if (ok) {
+    showToast("Archived ✓", { state: "ok", ms: 1600 });
+  } else {
+    if (BRIEF && BRIEF.items && BRIEF.items.indexOf(i) < 0) {
+      BRIEF.items.splice(Math.min(idx, BRIEF.items.length), 0, i);
+      cacheBrief(); render();
+    }
+    showToast("Couldn't archive — back in your inbox", { state: "fail", ms: 4500 });
   }
 }
 
@@ -739,6 +808,31 @@ function updateAppBadge() {
   (n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
 }
 
+// Command-center daily brief: the derivable at-a-glance stats. (Meeting-change
+// and document-action counts arrive with the AI action-summary phase.)
+function renderBriefStrip(attn) {
+  const strip = $("briefStrip");
+  strip.replaceChildren();
+  if (!attn.length) { strip.style.display = "none"; return; }
+  strip.style.display = "flex";
+  const repliable = attn.filter(i => i.reply_to).length;
+  const unread = attn.filter(i => i.unread).length;
+  const oldest = attn.reduce((m, i) => Math.min(m, i.ts || Infinity), Infinity);
+  const overdue = oldest !== Infinity && (Date.now() / 1000 - oldest) > 172800; // >2 days
+  const cells = [
+    { n: attn.length, label: "need attention", tone: "gold" },
+    { n: repliable, label: repliable === 1 ? "to reply" : "to reply", tone: "gold" },
+    { n: unread, label: "unread", tone: "blue" },
+  ];
+  if (oldest !== Infinity) cells.push({ n: ago(oldest), label: "oldest waiting", tone: overdue ? "red" : "gray" });
+  cells.forEach(c => {
+    const cell = el("div", "statCell tone-" + c.tone);
+    cell.appendChild(el("div", "statN", String(c.n)));
+    cell.appendChild(el("div", "statL", c.label));
+    strip.appendChild(cell);
+  });
+}
+
 function render() {
   if (!BRIEF) return;
   updateAppBadge();
@@ -747,6 +841,8 @@ function render() {
   const attn = items.filter(i => i.bucket === "attention");
   const fyi  = items.filter(i => i.bucket === "fyi");
   const junk = items.filter(i => i.bucket === "junk");
+
+  renderBriefStrip(SEARCH ? [] : attn);
 
   const chips = $("chips");
   chips.replaceChildren();
