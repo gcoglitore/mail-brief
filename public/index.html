@@ -157,6 +157,15 @@
   .sugChip:hover { border-color: var(--gold); }
   .sugNote { font-size: 12px; color: var(--gold); padding: 2px; }
   .sugErr { font-size: 12px; color: var(--red); padding: 2px; }
+  .toneChips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .toneChip { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); font-size: 12.5px; font-weight: 700; cursor: pointer; }
+  .toneChip:hover { border-color: var(--gold); }
+  .toneChip.on { background: var(--gold); border-color: var(--gold); color: #14100a; }
+  .toneChip.custom { color: var(--dim); }
+  #composeWarn { display: none; margin: 8px 0 0; padding: 8px 11px; border-radius: 9px; font-size: 12.5px;
+    background: rgba(224,86,79,.12); border: 1px solid rgba(224,86,79,.45); color: var(--red); font-weight: 600; }
+  #aiDisclosure { font-size: 10.5px; color: var(--faint); margin-top: 10px; text-align: center; }
   .fyi .subj { color: var(--dim); }
   .fyi { opacity: .92; }
 
@@ -373,11 +382,13 @@
     <input id="composeSubj" type="text" placeholder="Subject">
     <div id="composeSuggest"></div>
     <textarea id="composeBody" placeholder="Write your reply… (tap the mic on your keyboard to dictate)"></textarea>
+    <div id="composeWarn"></div>
     <div id="composeBtns">
       <button id="composeSend">Send</button>
       <button id="composeCancel">Cancel</button>
     </div>
     <div id="composeErr"></div>
+    <div id="aiDisclosure">✨ AI drafts &amp; summaries send this message's text to OpenRouter.</div>
   </div>
 </div>
 
@@ -674,6 +685,7 @@ function openCompose(i) {
   $("composeSubj").value = /^re:/i.test(i.subject || "") ? i.subject : "Re: " + (i.subject || "");
   $("composeBody").value = "";
   $("composeErr").textContent = "";
+  $("composeWarn").style.display = "none";
   $("composeSend").disabled = false;
   $("composeSend").textContent = "Send";
   $("composeWrap").style.display = "block";
@@ -689,6 +701,8 @@ async function sendReply() {
   if (!composeItem) return;
   const body = $("composeBody").value.trim();
   if (!body) { $("composeErr").textContent = "Write something first."; return; }
+  const ph = currentPlaceholders();
+  if (ph.length && !confirm("This reply still has placeholders: " + ph.join(", ") + "\n\nSend anyway?")) return;
   const btn = $("composeSend");
   btn.disabled = true;
   btn.textContent = "Sending…";
@@ -1045,36 +1059,77 @@ $("readerDraft").addEventListener("click", () => { if (readerItem) draftReply(re
 // AI-drafted replies in Gio's voice: open the compose sheet and fill it with
 // tappable suggestions from the function. Each suggestion drops into the body
 // (then edit / dictate / send as normal).
-async function draftReply(i) {
+const TONE_CHIPS = [
+  { key: "quick_yes", label: "Quick yes" },
+  { key: "question", label: "Ask a question" },
+  { key: "decline", label: "Decline" },
+  { key: "schedule", label: "Schedule" },
+];
+
+// "✨ Draft": offer tone chips instead of three generic drafts. Picking one
+// generates a single reply in that tone, with any unknown detail left as a
+// highlighted [placeholder] you must fill before sending.
+function draftReply(i) {
   openCompose(i);
   const sug = $("composeSuggest");
-  sug.replaceChildren(el("div", "sugNote", "✨ drafting in your voice…"));
+  sug.replaceChildren();
+  sug.appendChild(el("div", "sugNote", "Draft a reply — pick a tone:"));
+  const row = el("div", "toneChips");
+  TONE_CHIPS.forEach(t => {
+    const chip = el("button", "toneChip", t.label);
+    chip.addEventListener("click", () => generateDraft(i, t.key, chip));
+    row.appendChild(chip);
+  });
+  const custom = el("button", "toneChip custom", "Custom");
+  custom.addEventListener("click", () => { sug.replaceChildren(); $("composeBody").focus(); });
+  row.appendChild(custom);
+  sug.appendChild(row);
+}
+
+async function generateDraft(i, tone, chipEl) {
+  const sug = $("composeSuggest");
+  [...sug.querySelectorAll(".toneChip")].forEach(c => c.classList.remove("on"));
+  if (chipEl) chipEl.classList.add("on");
+  let note = sug.querySelector(".sugNote");
+  if (!note) { note = el("div", "sugNote"); sug.insertBefore(note, sug.firstChild); }
+  note.className = "sugNote"; note.textContent = "✨ drafting in your voice…";
   const key = localStorage.getItem("mailbrief_key");
   try {
     const r = await fetch(API, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, action: "draft", kind: "email",
+      body: JSON.stringify({ key, action: "draft", kind: "email", tone,
         subject: i.subject, sender: (i.from_name || "") + " <" + (i.from_email || "") + ">",
         body: i.body || i.snippet || "" }),
     });
     const d = await r.json().catch(() => ({}));
-    sug.replaceChildren();
-    if (!r.ok || !d.options) { sug.appendChild(el("div", "sugErr", d.error || "Couldn't draft right now")); return; }
-    sug.appendChild(el("div", "sugNote", "Tap one to use it, then edit or dictate:"));
-    d.options.forEach(opt => {
-      const chip = el("button", "sugChip", opt.length > 90 ? opt.slice(0, 90) + "…" : opt);
-      chip.addEventListener("click", () => { $("composeBody").value = opt; $("composeBody").focus(); });
-      sug.appendChild(chip);
-    });
+    if (!r.ok || !d.options || !d.options[0]) { note.className = "sugErr"; note.textContent = d.error || "Couldn't draft right now"; return; }
+    $("composeBody").value = d.options[0];
+    note.textContent = "Edit or dictate, then send:";
+    updatePlaceholderWarning();
+    $("composeBody").focus();
   } catch (e) {
-    sug.replaceChildren(el("div", "sugErr", "Offline — can't draft right now"));
+    note.className = "sugErr"; note.textContent = "Offline — can't draft right now";
   }
+}
+
+// Any [bracketed] text the AI left because it lacked a detail. Surfaced as a
+// warning and guarded at send-time so a half-filled draft can't go out.
+function currentPlaceholders() {
+  const m = ($("composeBody").value.match(/\[[^\]\n]{1,40}\]/g)) || [];
+  return [...new Set(m)];
+}
+function updatePlaceholderWarning() {
+  const ph = currentPlaceholders();
+  const w = $("composeWarn");
+  if (ph.length) { w.textContent = "⚠ Fill in before sending: " + ph.join(", "); w.style.display = "block"; }
+  else { w.style.display = "none"; w.textContent = ""; }
 }
 $("readerDone").addEventListener("click", () => { if (readerItem) archiveItem(readerItem); });
 $("readAllBtn").addEventListener("click", markAllRead);
 
 $("composeSend").addEventListener("click", sendReply);
 $("composeCancel").addEventListener("click", closeCompose);
+$("composeBody").addEventListener("input", updatePlaceholderWarning);
 $("composeWrap").addEventListener("click", e => { if (e.target === $("composeWrap")) closeCompose(); });
 
 $("keyBtn").addEventListener("click", () => load($("keyInput").value.trim(), true));

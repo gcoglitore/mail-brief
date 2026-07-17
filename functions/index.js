@@ -60,21 +60,37 @@ const GIO_PERSONA =
   "Never invent facts, numbers, dates, or commitments; if a specific detail is needed but " +
   "unknown, leave a short [bracketed placeholder]. Match the formality of the incoming message.";
 
-async function draftReplies(kind, sender, subject, bodyText, intent) {
+const TONE_GOAL = {
+  quick_yes: 'Accept and agree — affirmative and brief.',
+  question: 'Ask the single most useful clarifying question.',
+  decline: 'Politely decline or defer — warm but clear.',
+  schedule: 'Propose a specific time to meet or talk.',
+};
+
+async function draftReplies(kind, sender, subject, bodyText, intent, tone) {
   const orKey = process.env.OPENROUTER_API_KEY;   // preferred — one key, easy signup
   const anthKey = process.env.ANTHROPIC_API_KEY;  // fallback — direct Anthropic
   if (!orKey && !anthKey) {
     return { error: 'AI drafting not set up — add an OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) secret and redeploy' };
   }
-  const user =
+  const context =
     `Incoming ${kind === 'message' ? 'chat message' : 'email'}:\n` +
     `From: ${sender || '?'}\n` + (subject ? `Subject: ${subject}\n` : '') +
-    `Message:\n${(bodyText || '').slice(0, 4000)}\n\n` +
-    (intent ? `Gio's intent for the reply: ${intent}\n\n` : '') +
-    `Write 3 ready-to-send reply options in Gio's voice, of varying tone (1: brief/affirmative, ` +
-    `2: a little more detailed, 3: a polite defer or a clarifying question). ` +
-    `${kind === 'message' ? 'Short and casual, no sign-off.' : 'Email style; sign as "Gio".'} ` +
-    `Reply with ONLY JSON: {"options":["...","...","..."]}`;
+    `Message:\n${(bodyText || '').slice(0, 4000)}\n\n`;
+  const goal = tone && TONE_GOAL[tone];
+  const user = goal
+    ? context +
+      `Write ONE ready-to-send reply in Gio's voice. Goal: ${goal} ` +
+      `For any specific detail you do NOT have (a date, time, number, name, or link), ` +
+      `insert a clear [placeholder in square brackets] instead of inventing it. ` +
+      `${kind === 'message' ? 'Short and casual, no sign-off.' : 'Email style; sign as "Gio".'} ` +
+      `Reply with ONLY JSON: {"draft":"...","missing":["short phrase per missing detail"]}`
+    : context +
+      (intent ? `Gio's intent for the reply: ${intent}\n\n` : '') +
+      `Write 3 ready-to-send reply options in Gio's voice, of varying tone (1: brief/affirmative, ` +
+      `2: a little more detailed, 3: a polite defer or a clarifying question). ` +
+      `${kind === 'message' ? 'Short and casual, no sign-off.' : 'Email style; sign as "Gio".'} ` +
+      `Reply with ONLY JSON: {"options":["...","...","..."]}`;
   try {
     let text;
     if (orKey) {
@@ -100,7 +116,16 @@ async function draftReplies(kind, sender, subject, bodyText, intent) {
     }
     if (!text) return { error: 'no draft returned' };
     const m = text.match(/\{[\s\S]*\}/);
-    const opts = m ? JSON.parse(m[0]).options : null;
+    const parsed = m ? JSON.parse(m[0]) : null;
+    if (!parsed) return { error: 'could not parse draft' };
+    if (goal) {
+      const draft = parsed.draft ? String(parsed.draft).slice(0, 2000) : '';
+      if (!draft) return { error: 'could not parse draft' };
+      const missing = Array.isArray(parsed.missing)
+        ? parsed.missing.slice(0, 6).map(x => String(x).slice(0, 60)) : [];
+      return { options: [draft], missing };
+    }
+    const opts = parsed.options;
     if (!Array.isArray(opts) || !opts.length) return { error: 'could not parse draft' };
     return { options: opts.slice(0, 3).map(o => String(o).slice(0, 2000)) };
   } catch (e) {
@@ -121,8 +146,8 @@ functions.http('sendReply', async (req, res) => {
   if (!keyOk(key)) return res.status(401).json({ error: 'bad key' });
 
   if (action === 'draft') {
-    const out = await draftReplies(req.body.kind, req.body.sender, subject, body, req.body.intent);
-    return res.status(out.error ? 503 : 200).json(out.error ? out : { ok: true, options: out.options });
+    const out = await draftReplies(req.body.kind, req.body.sender, subject, body, req.body.intent, req.body.tone);
+    return res.status(out.error ? 503 : 200).json(out.error ? out : { ok: true, options: out.options, missing: out.missing || [] });
   }
 
   if (action === 'markread' || action === 'markallread') {
