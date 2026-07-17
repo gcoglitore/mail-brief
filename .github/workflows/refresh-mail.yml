@@ -39,4 +39,5 @@ jobs:
           MAILBRIEF_ACCESS_KEY: ${{ secrets.MAILBRIEF_ACCESS_KEY }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python pipeline/refresh_mail.py

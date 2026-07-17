@@ -125,6 +125,9 @@
   .subj { font-size: 14px; margin-top: 4px; }
   .snip { font-size: 12.5px; color: var(--dim); margin-top: 3px;
           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .actionSum { font-size: 13px; color: var(--gold); font-weight: 600; margin-top: 4px;
+    display: flex; align-items: baseline; gap: 6px; }
+  .actionSum .actionDot { font-size: 11px; opacity: .8; }
   .expandHint { color: var(--faint); font-size: 11px; margin-top: 5px; }
 
   /* full-screen email reader */
@@ -436,7 +439,16 @@ function card(i, cls) {
   node.appendChild(row);
 
   node.appendChild(el("div", "subj", i.subject || "(no subject)"));
-  if (i.snippet) node.appendChild(el("div", "snip", i.snippet));
+  // Lead with the AI action summary ("what do they need") when we have it;
+  // fall back to the raw snippet otherwise.
+  if (i.action_summary) {
+    const a = el("div", "actionSum");
+    a.appendChild(el("span", "actionDot", "➜"));
+    a.appendChild(document.createTextNode(i.action_summary));
+    node.appendChild(a);
+  } else if (i.snippet) {
+    node.appendChild(el("div", "snip", i.snippet));
+  }
 
   if (hasBody) {
     node.appendChild(el("div", "expandHint", "tap to read"));
@@ -819,11 +831,17 @@ function renderBriefStrip(attn) {
   const unread = attn.filter(i => i.unread).length;
   const oldest = attn.reduce((m, i) => Math.min(m, i.ts || Infinity), Infinity);
   const overdue = oldest !== Infinity && (Date.now() / 1000 - oldest) > 172800; // >2 days
+  const meetings = attn.filter(i => i.signals && i.signals.meeting).length;
+  const docs = attn.filter(i => i.signals && i.signals.doc).length;
   const cells = [
     { n: attn.length, label: "need attention", tone: "gold" },
-    { n: repliable, label: repliable === 1 ? "to reply" : "to reply", tone: "gold" },
-    { n: unread, label: "unread", tone: "blue" },
+    { n: repliable, label: "to reply", tone: "gold" },
   ];
+  // Meeting/document counts appear once the AI has tagged items; otherwise fall
+  // back to the always-available "unread" stat so the strip is never sparse.
+  if (meetings) cells.push({ n: meetings, label: meetings === 1 ? "meeting change" : "meeting changes", tone: "gold" });
+  if (docs) cells.push({ n: docs, label: docs === 1 ? "doc to action" : "docs to action", tone: "gold" });
+  if (!meetings && !docs) cells.push({ n: unread, label: "unread", tone: "blue" });
   if (oldest !== Infinity) cells.push({ n: ago(oldest), label: "oldest waiting", tone: overdue ? "red" : "gray" });
   cells.forEach(c => {
     const cell = el("div", "statCell tone-" + c.tone);

@@ -102,14 +102,48 @@ def heuristic_bucket(item, headers):
     return "attention"
 
 
-def claude_refine(items, api_key):
-    """Ask Claude to classify items the heuristics marked 'attention'.
-    Falls back silently if the API call fails."""
+def _ai_complete(prompt, anthropic_key, openrouter_key):
+    """Return the model's text. Prefers OpenRouter (Gio's active key); falls back
+    to the Anthropic API. Only the sender/subject/snippet is ever sent — never the
+    full body. Returns None if no key is set."""
+    if openrouter_key:
+        req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=json.dumps({
+                "model": "anthropic/claude-haiku-4.5",
+                "max_tokens": 1500,
+                "messages": [{"role": "user", "content": prompt}],
+            }).encode(),
+            headers={"Authorization": "Bearer " + openrouter_key, "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read())["choices"][0]["message"]["content"]
+    if anthropic_key:
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=json.dumps({
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 1500,
+                "messages": [{"role": "user", "content": prompt}],
+            }).encode(),
+            headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read())["content"][0]["text"]
+    return None
+
+
+def claude_refine(items, anthropic_key, openrouter_key):
+    """Ask the model to (a) re-classify attention items and (b) for each, name the
+    ACTION the sender needs plus lightweight signals (reply/meeting/doc). Only the
+    sender, subject, and a short snippet are sent — never the full body. Entirely
+    best-effort: any failure leaves the heuristic classification untouched."""
     pending = [i for i in items if i["bucket"] == "attention"]
     if not pending:
         return
     listing = "\n".join(
-        f'{n}. From: {i["from_name"]} <{i["from_email"]}> | Subject: {i["subject"]} | Snippet: {i["snippet"][:100]}'
+        f'{n}. From: {i["from_name"]} <{i["from_email"]}> | Subject: {i["subject"]} | Snippet: {i["snippet"][:160]}'
         for n, i in enumerate(pending)
     )
     prompt = (
@@ -117,36 +151,40 @@ def claude_refine(items, api_key):
         "Real people, partners, legal, investors, meeting changes = attention. "
         "Automated-but-relevant (receipts, alerts, CI results, signature-complete notices) = fyi. "
         "Marketing, newsletters, cold sales = junk.\n"
-        "Classify each numbered email. Reply ONLY with JSON: "
-        '{"verdicts": [{"n": 0, "bucket": "attention|fyi|junk"}, ...]}\n\n' + listing
-    )
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=json.dumps({
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 2000,
-            "messages": [{"role": "user", "content": prompt}],
-        }).encode(),
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
+        "For EACH numbered email return: n, bucket (attention|fyi|junk), "
+        "summary (<= 8 words naming the ACTION the sender needs FROM Gio, e.g. "
+        "'Needs your signature, page 4', 'Confirm Tues 10am', 'Review before merge'; "
+        "empty string if purely informational), "
+        "reply (true if it needs a reply from Gio), "
+        "meeting (true if it's about a meeting or scheduling change), "
+        "doc (true if a document needs his review or signature).\n"
+        'Reply ONLY with JSON: {"verdicts":[{"n":0,"bucket":"attention",'
+        '"summary":"...","reply":true,"meeting":false,"doc":true}]}\n\n' + listing
     )
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read())
-        text = data["content"][0]["text"]
+        text = _ai_complete(prompt, anthropic_key, openrouter_key)
+        if not text:
+            return
         match = re.search(r"\{.*\}", text, re.S)
         verdicts = json.loads(match.group(0))["verdicts"]
         for v in verdicts:
             n = v.get("n")
+            if not (isinstance(n, int) and 0 <= n < len(pending)):
+                continue
             bucket = v.get("bucket")
-            if isinstance(n, int) and 0 <= n < len(pending) and bucket in ("attention", "fyi", "junk"):
+            if bucket in ("attention", "fyi", "junk"):
                 pending[n]["bucket"] = bucket
-        print(f"Claude refined {len(verdicts)} classifications")
+            summary = (v.get("summary") or "").strip()
+            if summary:
+                pending[n]["action_summary"] = summary[:80]
+            pending[n]["signals"] = {
+                "reply": bool(v.get("reply")),
+                "meeting": bool(v.get("meeting")),
+                "doc": bool(v.get("doc")),
+            }
+        print(f"AI refined {len(verdicts)} items")
     except Exception as exc:  # scoring is best-effort
-        print(f"Claude scoring skipped: {exc}")
+        print(f"AI scoring skipped: {exc}")
 
 
 def fetch_account(label, addr, host, password):
@@ -317,9 +355,10 @@ def main():
         print("Every account failed to log in — keeping the previously published brief untouched.")
         sys.exit(0)
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if api_key:
-        claude_refine(all_items, api_key)
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
+    if anthropic_key or openrouter_key:
+        claude_refine(all_items, anthropic_key, openrouter_key)
 
     # junk never carries full text — keeps the brief lean and the cloud footprint small
     for i in all_items:
