@@ -174,8 +174,8 @@
   .empty { color: var(--faint); font-size: 13px; padding: 8px 2px; }
 
   /* view tabs */
-  #mailTools { display: flex; justify-content: flex-end; margin-bottom: 8px; }
-  #readAllBtn { padding: 5px 14px; border-radius: 8px; border: 1px solid var(--line);
+  #mailTools, #msgTools { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+  #readAllBtn, #msgReadAllBtn { padding: 5px 14px; border-radius: 8px; border: 1px solid var(--line);
     background: var(--panel2); color: var(--green); font-size: 12.5px; font-weight: 700; cursor: pointer; }
   #viewTabs { display: flex; gap: 8px; margin-bottom: 10px; }
   #searchBox { width: 100%; padding: 10px 14px; margin-bottom: 14px; border-radius: 10px;
@@ -975,6 +975,13 @@ function renderMessages() {
     v.appendChild(el("div", "empty", none));
     return;
   }
+  if (chats.some(c => c.unread > 0)) {
+    const tools = el("div", null); tools.id = "msgTools";
+    const btn = el("button", null, "✓ Mark all read"); btn.id = "msgReadAllBtn";
+    btn.addEventListener("click", markAllMessagesRead);
+    tools.appendChild(btn);
+    v.appendChild(tools);
+  }
   chats.forEach(c => {
     const row = el("div", "chat");
     row.appendChild(el("span", "net " + netClass(c.network), netLabel(c.network)));
@@ -1005,6 +1012,27 @@ function markChatRead(c) {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chatID: c.id, action: "read", at: Date.now() }),
   }).catch(() => {});
+}
+
+// Mark every conversation in the current tab (Texts or DMs) read.
+function markAllMessagesRead() {
+  const chats = (MSGS && MSGS.chats) || [];
+  const key = localStorage.getItem("mailbrief_key");
+  let changed = false;
+  chats.forEach(c => {
+    if (msgCategory(c.network) !== MSGVIEW || !c.unread) return;
+    c.unread = 0; changed = true;
+    if (key && c.id) {
+      fetch(DB + "/briefs/" + encodeURIComponent(key) + "/msg_outbox.json", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatID: c.id, action: "read", at: Date.now() }),
+      }).catch(() => {});
+    }
+  });
+  if (!changed) return;
+  try { localStorage.setItem("mailbrief_msgs", JSON.stringify(MSGS)); } catch (_) {}
+  renderMessages();
+  updateMsgBadges();
 }
 
 function openThread(c) {
