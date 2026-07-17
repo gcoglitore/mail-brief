@@ -991,8 +991,25 @@ function renderMessages() {
   });
 }
 
+// Clear a conversation's unread state locally and tell the Mac to mark it
+// read in Beeper (so the count stays cleared after the next refresh).
+function markChatRead(c) {
+  if (!c || !c.unread) return;
+  c.unread = 0;
+  try { localStorage.setItem("mailbrief_msgs", JSON.stringify(MSGS)); } catch (_) {}
+  renderMessages();   // drop the row's unread pill (list stays visible on desktop)
+  updateMsgBadges();
+  const key = localStorage.getItem("mailbrief_key");
+  if (!key || !c.id) return;
+  fetch(DB + "/briefs/" + encodeURIComponent(key) + "/msg_outbox.json", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chatID: c.id, action: "read", at: Date.now() }),
+  }).catch(() => {});
+}
+
 function openThread(c) {
   threadChat = c;
+  markChatRead(c);
   $("threadNet").textContent = netLabel(c.network);
   $("threadNet").className = "net " + netClass(c.network);
   $("threadTitle").textContent = c.title || "(no title)";

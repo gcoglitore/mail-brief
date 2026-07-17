@@ -301,22 +301,34 @@ def drain_outbox(key, btok, dbtok):
         return 0
     sent = 0
     for oid, entry in (pending.items() if isinstance(pending, dict) else []):
-        chat_id = (entry or {}).get("chatID")
-        text = (entry or {}).get("text")
-        if not chat_id or not text:
+        entry = entry or {}
+        chat_id = entry.get("chatID")
+        action = entry.get("action") or "send"
+        text = entry.get("text")
+        cq = urllib.parse.quote(chat_id, safe="") if chat_id else ""
+        if not chat_id or (action == "send" and not text):
             db_request(f"/briefs/{key}/msg_outbox/{oid}.json", dbtok, method="DELETE")
             continue
         try:
-            if chat_id.startswith("imsg:"):
-                send_imessage(chat_id[5:], text)
-            elif btok:
-                beeper_post(f"/v1/chats/{urllib.parse.quote(chat_id, safe='')}/messages", btok, {"text": text})
-            else:
-                continue  # Beeper send needs a token we don't have yet — leave queued
+            if action == "read":
+                # Mark the conversation read in Beeper (syncs to the real service).
+                if chat_id.startswith("imsg:"):
+                    pass  # iMessage read-state isn't writable from here — just clear the queue entry
+                elif btok:
+                    beeper_post(f"/v1/chats/{cq}/read", btok, {})
+                else:
+                    continue  # need a Beeper token — leave queued
+            else:  # send a reply
+                if chat_id.startswith("imsg:"):
+                    send_imessage(chat_id[5:], text)
+                elif btok:
+                    beeper_post(f"/v1/chats/{cq}/messages", btok, {"text": text})
+                else:
+                    continue  # Beeper send needs a token we don't have yet — leave queued
             db_request(f"/briefs/{key}/msg_outbox/{oid}.json", dbtok, method="DELETE")
             sent += 1
         except Exception as exc:
-            print(f"send failed for {chat_id}: {exc}")
+            print(f"{action} failed for {chat_id}: {exc}")
     return sent
 
 
