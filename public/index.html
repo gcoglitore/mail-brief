@@ -257,7 +257,7 @@
   <div id="app" style="display:none">
     <div id="netBar"></div>
     <div id="viewTabs">
-      <button id="tabMail" class="vtab on">Mail</button>
+      <button id="tabMail" class="vtab on">Mail<span id="mailBadge" class="tabBadge"></span></button>
       <button id="tabMsg" class="vtab">Texts<span id="msgBadge" class="tabBadge"></span></button>
       <button id="tabDM" class="vtab">DMs<span id="dmBadge" class="tabBadge"></span></button>
     </div>
@@ -645,8 +645,9 @@ function section(parent, label, color, items, cls, emptyText) {
 // Push the unread email count to the iPhone home-screen badge (the red number
 // on the app icon). Works on installed PWAs once notifications are allowed.
 function updateAppBadge() {
-  if (!("setAppBadge" in navigator)) return;
   const n = (BRIEF && BRIEF.items) ? BRIEF.items.filter(i => i.unread).length : 0;
+  setBadge("mailBadge", n);   // red count on the Mail tab
+  if (!("setAppBadge" in navigator)) return;
   (n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
 }
 
