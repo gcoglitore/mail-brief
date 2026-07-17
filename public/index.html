@@ -73,6 +73,9 @@
   }
   .secHead .dot { width: 8px; height: 8px; border-radius: 50%; }
   .count { color: var(--faint); font-weight: 400; }
+  .clearAllBtn { margin-left: auto; padding: 3px 11px; border-radius: 7px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--green); font-size: 11px; font-weight: 700;
+    letter-spacing: .5px; cursor: pointer; }
 
   .card {
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
@@ -497,6 +500,62 @@ async function archiveItem(i) {
   }
 }
 
+// "Clear all": archive every email currently shown in Needs Attention (respects
+// the account filter). Files them to Archive/All Mail — reversible, not deleted.
+// One bulk call per account, so 50 emails = a couple of requests, not 50.
+async function archiveAllAttention() {
+  if (!BRIEF || !BRIEF.items) return;
+  const targets = BRIEF.items.filter(i =>
+    i.bucket === "attention" && (FILTER === "ALL" || i.account === FILTER));
+  if (!targets.length) return;
+  const scope = FILTER === "ALL" ? "" : " in " + FILTER;
+  if (!confirm("Archive all " + targets.length + " emails in Needs Attention" + scope +
+    "?\n\nThey move to your Archive (not deleted) and you can still find them in your mailbox.")) return;
+
+  const key = localStorage.getItem("mailbrief_key");
+  const removed = targets.slice();
+  removed.forEach(i => {
+    const idx = BRIEF.items.indexOf(i);
+    if (idx >= 0) BRIEF.items.splice(idx, 1);
+  });
+  try { localStorage.setItem("mailbrief_cache", JSON.stringify(BRIEF)); } catch (e) {}
+  closeReader();
+  render();
+  updateNetBar(undefined, "Archiving " + removed.length + "…");
+
+  // Group by account and send one bulk archive request each.
+  const byAccount = {};
+  removed.forEach(i => {
+    if (!i.msgid) return; // demo/no-id items can't sync
+    (byAccount[i.account] = byAccount[i.account] || []).push(i.msgid);
+  });
+  const failed = [];
+  for (const account of Object.keys(byAccount)) {
+    try {
+      const r = await fetch(API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, action: "archiveall", account, msgids: byAccount[account] }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!(r.ok && typeof d.archived === "number")) {
+        failed.push(...removed.filter(i => i.account === account && i.msgid));
+      }
+    } catch (e) {
+      failed.push(...removed.filter(i => i.account === account && i.msgid));
+    }
+  }
+  if (failed.length) {
+    failed.forEach(i => BRIEF.items.push(i));
+    try { localStorage.setItem("mailbrief_cache", JSON.stringify(BRIEF)); } catch (e) {}
+    render();
+    updateNetBar(undefined, failed.length + " couldn't be archived — still in your inbox");
+    setTimeout(() => updateNetBar(), 6000);
+  } else {
+    updateNetBar(undefined, "Archived " + removed.length + " ✓");
+    setTimeout(() => updateNetBar(), 3000);
+  }
+}
+
 // Mark every shown unread email read — locally and on Gmail/Yahoo.
 async function markAllRead() {
   if (!BRIEF || !BRIEF.items) return;
@@ -647,13 +706,18 @@ async function flushOutbox() {
   }
 }
 
-function section(parent, label, color, items, cls, emptyText) {
+function section(parent, label, color, items, cls, emptyText, onClearAll) {
   const head = el("div", "secHead");
   const dot = el("span", "dot");
   dot.style.background = color;
   head.appendChild(dot);
   head.appendChild(document.createTextNode(label + " "));
   head.appendChild(el("span", "count", "(" + items.length + ")"));
+  if (onClearAll && items.length) {
+    const btn = el("button", "clearAllBtn", "Clear all");
+    btn.addEventListener("click", onClearAll);
+    head.appendChild(btn);
+  }
   parent.appendChild(head);
   if (!items.length) {
     parent.appendChild(el("div", "empty", emptyText));
@@ -695,7 +759,7 @@ function render() {
     const matches = items.filter(i => matchText(SEARCH, i.from_name, i.from_email, i.subject, i.snippet, i.body));
     section(content, "RESULTS", "var(--gold)", matches, "", "No matching email.");
   } else {
-    section(content, "NEEDS ATTENTION", "var(--red)", attn, "attn", "Nothing needs your attention.");
+    section(content, "NEEDS ATTENTION", "var(--red)", attn, "attn", "Nothing needs your attention.", archiveAllAttention);
     section(content, "FYI", "var(--blue)", fyi, "fyi", "Nothing here.");
 
     const junkHead = el("div", "secHead");

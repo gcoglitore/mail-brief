@@ -160,13 +160,15 @@ functions.http('sendReply', async (req, res) => {
     }
   }
 
-  if (action === 'archive') {
-    // "Done": mark \Seen and move the message out of the inbox (Gmail All Mail /
-    // Yahoo Archive). Reversible — nothing is deleted, just archived.
+  if (action === 'archive' || action === 'archiveall') {
+    // "Done" (archive, one) / "Clear all" (archiveall, many for one account):
+    // mark \Seen and move the message(s) out of the inbox (Gmail All Mail /
+    // Yahoo Archive) in a single connection. Reversible — nothing is deleted.
     const acct = findAccount(String(account || ''));
     if (!acct) return res.status(404).json({ error: 'account not connected' });
-    const id = String(msgid || '').replace(/[<>]/g, '').trim();
-    if (!id) return res.status(400).json({ error: 'msgid required' });
+    const ids = (action === 'archiveall' ? (req.body.msgids || []) : [msgid])
+      .map(m => String(m || '').replace(/[<>]/g, '').trim()).filter(Boolean);
+    if (!ids.length) return res.status(400).json({ error: 'msgid(s) required' });
     const isGmail = /gmail/i.test(acct.imapHost);
     const client = new ImapFlow({
       host: acct.imapHost, port: 993, secure: true,
@@ -183,20 +185,25 @@ functions.http('sendReply', async (req, res) => {
         }
       } catch (_) {}
       if (!dest) dest = isGmail ? '[Gmail]/All Mail' : 'Archive';
-      let archived = false;
+      let archived = 0;
       const lock = await client.getMailboxLock('INBOX');
       try {
-        const uids = await findUids(client, isGmail, id);
-        if (uids && uids.length) {
-          await client.messageFlagsAdd(uids, ['\\Seen'], { uid: true });
-          await client.messageMove(uids, dest, { uid: true });
-          archived = true;
+        const all = [];
+        for (const id of ids) {
+          const uids = await findUids(client, isGmail, id);
+          if (uids && uids.length) all.push(...uids);
+        }
+        if (all.length) {
+          await client.messageFlagsAdd(all, ['\\Seen'], { uid: true });
+          await client.messageMove(all, dest, { uid: true });
+          archived = all.length;
         }
       } finally {
         lock.release();
       }
       await client.logout();
-      return res.json({ ok: true, archived });
+      // single archive keeps its boolean shape; bulk returns a count
+      return res.json({ ok: true, archived: action === 'archive' ? archived > 0 : archived });
     } catch (e) {
       try { await client.close(); } catch (_) {}
       return res.status(502).json({ error: 'imap: ' + ((e && e.message) || 'failed') });
