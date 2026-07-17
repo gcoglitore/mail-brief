@@ -15,6 +15,7 @@
     --bg: #0b0f14; --panel: #121922; --panel2: #0f141c; --line: #1f2a37;
     --text: #e6edf3; --dim: #8b98a5; --faint: #5c6773;
     --gold: #d4a843; --red: #e0564f; --blue: #4a86e8; --green: #3fb37f;
+    --list-w: 500px; /* width of the list column in the desktop two-pane layout */
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -231,6 +232,21 @@
     border-top: 1px solid var(--line); max-width: 760px; margin: 0 auto; width: 100%; }
   #threadInput { flex: 1; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line);
     background: var(--panel); color: var(--text); font-size: 14px; }
+  /* Right-pane placeholder — only visible on desktop when nothing is open */
+  #deskPane {
+    display: none; position: fixed; left: var(--list-w); right: 0; top: 0; bottom: 0; z-index: 4;
+    align-items: center; justify-content: center; text-align: center; padding: 40px;
+    color: var(--faint); font-size: 15px; line-height: 1.6;
+  }
+  #deskPane .dpIcon { font-size: 34px; display: block; margin-bottom: 12px; opacity: .8; }
+  /* ---- Desktop two-pane layout (wide screens only; phone view untouched) ---- */
+  @media (min-width: 980px) {
+    .wrap { max-width: var(--list-w); margin: 0; min-height: 100vh;
+      border-right: 1px solid var(--line); padding: 22px 22px 60px 30px; }
+    #reader, #thread { left: var(--list-w); }
+    #readerInner { max-width: 680px; }
+    #deskPane { display: flex; flex-direction: column; }
+  }
   #threadSend { padding: 0 18px; border: 0; border-radius: 999px; background: var(--gold);
     color: #14100a; font-weight: 700; cursor: pointer; }
 </style>
@@ -305,6 +321,10 @@
     </div>
     <div id="readerBody"></div>
   </div>
+</div>
+
+<div id="deskPane">
+  <div><span class="dpIcon">✉️</span>Select an email or conversation<br>to read it here.</div>
 </div>
 
 <div id="composeWrap">
