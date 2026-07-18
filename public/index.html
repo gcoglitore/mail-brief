@@ -35,12 +35,17 @@
   #updated { font-size: 12px; color: var(--dim); }
   #updated.stale { color: var(--red); }
   #updateBtn {
+    display: none;  /* hidden on the locked screen — nothing to refresh yet */
     width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line);
     background: var(--panel); color: var(--gold); font-size: 16px; cursor: pointer;
     line-height: 1; padding: 0;
   }
+  body.signed-in #updateBtn { display: inline-block; }
   #updateBtn.spin { animation: rot 1s linear infinite; opacity: .7; }
   @keyframes rot { to { transform: rotate(360deg); } }
+  /* Visible keyboard focus (a11y) */
+  button:focus-visible, input:focus-visible, [tabindex]:focus-visible, [role="tab"]:focus-visible,
+  [role="menuitem"]:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
   #netBar {
     display: none; margin-bottom: 12px; padding: 9px 13px; border-radius: 10px;
     font-size: 13px; background: var(--panel2); border: 1px solid var(--line); color: var(--gold);
@@ -94,11 +99,18 @@
   #keyScreen { display: none; text-align: center; padding: 80px 20px; }
   #keyScreen h2 { font-size: 17px; margin-bottom: 6px; }
   #keyScreen p { color: var(--dim); font-size: 13px; margin-bottom: 22px; }
+  #keyLabel { display: block; max-width: 360px; margin: 0 auto 6px; text-align: left;
+    font-size: 11px; letter-spacing: .5px; color: var(--dim); text-transform: uppercase; }
+  #keyField { position: relative; max-width: 360px; margin: 0 auto; }
   #keyInput {
-    width: 100%; max-width: 360px; padding: 12px 14px; border-radius: 10px;
+    width: 100%; padding: 12px 58px 12px 14px; border-radius: 10px;
     border: 1px solid var(--line); background: var(--panel); color: var(--text);
     font-size: 16px; text-align: center; letter-spacing: 1px;
   }
+  #keyReveal { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    background: none; border: 0; color: var(--dim); font-size: 12px; font-weight: 700;
+    cursor: pointer; padding: 6px 8px; }
+  #keyReveal:hover { color: var(--gold); }
   #keyBtn {
     margin-top: 14px; padding: 12px 34px; border: 0; border-radius: 10px;
     background: var(--gold); color: #14100a; font-size: 15px; font-weight: 700; cursor: pointer;
@@ -139,6 +151,9 @@
   .ago { margin-left: auto; color: var(--faint); font-size: 12px; white-space: nowrap; }
   .stalePill { margin-left: 8px; font-size: 9px; font-weight: 800; letter-spacing: .5px;
     padding: 2px 6px; border-radius: 5px; background: rgba(224,86,79,.15); color: var(--red);
+    border: 1px solid rgba(224,86,79,.4); white-space: nowrap; }
+  .overduePill { font-size: 9px; font-weight: 800; letter-spacing: .5px; padding: 2px 6px;
+    border-radius: 5px; background: rgba(224,86,79,.15); color: var(--red);
     border: 1px solid rgba(224,86,79,.4); white-space: nowrap; }
   .subj { font-size: 14px; margin-top: 4px; }
   .snip { font-size: 12.5px; color: var(--dim); margin-top: 3px;
@@ -366,7 +381,7 @@
     #briefStrip.hidden { display: none; }
     #briefStrip .statCell { display: none; }
     .briefLine { display: block; font-size: 12.5px; color: var(--dim); line-height: 1.5; }
-    #searchToggle { display: inline-flex; }
+    body.signed-in #searchToggle { display: inline-flex; }
     #searchBox { display: none; }
     #app.search-open #searchBox { display: block; }
   }
@@ -397,19 +412,22 @@
   <div id="keyScreen">
     <h2>Private Brief</h2>
     <p>Enter your access key. It will be remembered on this device.</p>
-    <input id="keyInput" type="password" autocomplete="current-password" placeholder="access key">
-    <br>
+    <label for="keyInput" id="keyLabel">Access key</label>
+    <div id="keyField">
+      <input id="keyInput" type="password" autocomplete="current-password" placeholder="access key">
+      <button id="keyReveal" type="button" aria-label="Show access key" aria-pressed="false">Show</button>
+    </div>
     <button id="keyBtn">Open</button>
     <div id="keyErr"></div>
   </div>
 
   <div id="app" style="display:none">
     <div id="netBar"></div>
-    <div id="viewTabs">
-      <button id="tabPriority" class="vtab on">Priority<span id="prioBadge" class="tabBadge"></span></button>
-      <button id="tabMail" class="vtab">All Mail<span id="mailBadge" class="tabBadge"></span></button>
-      <button id="tabMsg" class="vtab">Texts<span id="msgBadge" class="tabBadge"></span></button>
-      <button id="tabDM" class="vtab">DMs<span id="dmBadge" class="tabBadge"></span></button>
+    <div id="viewTabs" role="tablist" aria-label="Views">
+      <button id="tabPriority" class="vtab on" role="tab" aria-selected="true">Priority<span id="prioBadge" class="tabBadge"></span></button>
+      <button id="tabMail" class="vtab" role="tab" aria-selected="false">All Mail<span id="mailBadge" class="tabBadge"></span></button>
+      <button id="tabMsg" class="vtab" role="tab" aria-selected="false">Texts<span id="msgBadge" class="tabBadge"></span></button>
+      <button id="tabDM" class="vtab" role="tab" aria-selected="false">DMs<span id="dmBadge" class="tabBadge"></span></button>
     </div>
     <input id="searchBox" type="search" placeholder="Search…" autocomplete="off">
     <div id="briefStrip"></div>
@@ -450,7 +468,7 @@
     </div>
     <div id="readerSubject"></div>
     <div id="readerActions">
-      <button class="replyBtn" id="readerDone" style="margin-top:0">✓ Done</button>
+      <button class="replyBtn" id="readerDone" style="margin-top:0" title="Archives this email out of your inbox (reversible)">✓ Done</button>
       <button class="replyBtn" id="readerReply" style="margin-top:0">Reply</button>
       <button class="replyBtn" id="readerDraft" style="margin-top:0">✨ Draft</button>
       <a class="openLink" id="readerOpen" target="_blank" rel="noopener">Open in mailbox ↗</a>
@@ -495,6 +513,8 @@ let VIEW = "priority";  // active top-level view: priority | mail | msg | dm
 let FLAGS = {};         // per-item pin/snooze state, synced to the DB across devices
 let PRIO_SORT = "grouped";   // grouped (by intent) | newest (flat chronological)
 let PRIO_FILTER = "active";  // active | snoozed
+let AGING_DAYS = 2;          // an item older than this reads as overdue
+function isOverdue(ts) { return !!ts && (Date.now() / 1000 - ts) > AGING_DAYS * 86400; }
 
 // Case-insensitive: does the (already-lowercased) query appear in any field?
 function matchText(q) {
@@ -556,6 +576,7 @@ function card(i, cls) {
   meta.appendChild(el("span", "cSrc", i.account));
   meta.appendChild(el("span", "cSep", "·"));
   meta.appendChild(el("span", "cTime", ago(i.ts)));
+  if (i.bucket !== "junk" && isOverdue(i.ts)) { const o = el("span", "overduePill", "OVERDUE"); o.title = "Older than " + AGING_DAYS + " days"; meta.appendChild(o); }
   if (i.stale) { const s = el("span", "stalePill", "STALE"); s.title = "This account didn't refresh last time — showing your last known mail."; meta.appendChild(s); }
   node.appendChild(meta);
 
@@ -582,6 +603,7 @@ function card(i, cls) {
     }
     if (i.msgid) {
       const db = el("button", "rowBtn", "Done");
+      db.title = "Archives this email out of your inbox (reversible)";
       db.addEventListener("click", e => { e.preventDefault(); e.stopPropagation(); archiveItem(i); });
       foot.appendChild(db);
     }
@@ -674,7 +696,11 @@ function archiveItem(i) {
   cacheBrief();
   closeReader();
   render();
-  showToast("Archived", {
+  // Teach the mailbox consequence the first time; keep it terse afterwards.
+  const doneMsg = localStorage.getItem("mailbrief_done_taught")
+    ? "Archived" : "Archived — filed out of your inbox";
+  try { localStorage.setItem("mailbrief_done_taught", "1"); } catch (_) {}
+  showToast(doneMsg, {
     state: "ok", ms: 6000,
     undo: () => {                       // nothing sent yet — just restore it
       BRIEF.items.splice(Math.min(idx, BRIEF.items.length), 0, i);
@@ -1095,29 +1121,51 @@ function snoozeTo(id, p) {
   });
 }
 // Overflow (⋯) menu holding the low-frequency row actions: pin + snooze.
+// Accessible: role=menu/menuitem, arrow-key navigation, Escape-to-close, and
+// focus is restored to the ⋯ trigger on close.
+let _menuTrigger = null;
+function closeRowMenu(restoreFocus) {
+  const menu = $("snoozeMenu");
+  menu.style.display = "none";
+  menu.onkeydown = null;
+  if (restoreFocus && _menuTrigger) _menuTrigger.focus();
+  _menuTrigger = null;
+}
 function openRowMenu(e, anchorBtn) {
   const id = entryId(e);
   if (!id) return;
   const menu = $("snoozeMenu");
   menu.replaceChildren();
-  const pinOpt = el("button", "snzOpt", isPinned(id) ? "Unpin" : "Pin to top");
-  pinOpt.addEventListener("click", () => { menu.style.display = "none"; togglePin(id); });
-  menu.appendChild(pinOpt);
-  menu.appendChild(el("div", "snzTitle", "Snooze until…"));
-  SNOOZE_PRESETS.forEach(p => {
-    const b = el("button", "snzOpt", p.label);
-    b.addEventListener("click", () => { menu.style.display = "none"; snoozeTo(id, p); });
+  menu.setAttribute("role", "menu");
+  _menuTrigger = anchorBtn;
+  const items = [];
+  const addItem = (label, fn) => {
+    const b = el("button", "snzOpt", label);
+    b.setAttribute("role", "menuitem");
+    b.tabIndex = -1;
+    b.addEventListener("click", () => { closeRowMenu(true); fn(); });
     menu.appendChild(b);
-  });
+    items.push(b);
+  };
+  addItem(isPinned(id) ? "Unpin" : "Pin to top", () => togglePin(id));
+  menu.appendChild(el("div", "snzTitle", "Snooze until…"));
+  SNOOZE_PRESETS.forEach(p => addItem(p.label, () => snoozeTo(id, p)));
   menu.style.display = "block";
   const r = anchorBtn.getBoundingClientRect();
   menu.style.top = Math.min(r.bottom + 6, window.innerHeight - menu.offsetHeight - 10) + "px";
   menu.style.left = Math.max(8, Math.min(r.right - 190, window.innerWidth - 200)) + "px";
+  menu.onkeydown = ev => {
+    const i = items.indexOf(document.activeElement);
+    if (ev.key === "Escape") { ev.preventDefault(); closeRowMenu(true); }
+    else if (ev.key === "ArrowDown") { ev.preventDefault(); items[(i + 1) % items.length].focus(); }
+    else if (ev.key === "ArrowUp") { ev.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+  };
+  items[0].focus();
 }
 document.addEventListener("click", e => {
   const m = $("snoozeMenu");
   if (m && m.style.display === "block" && !m.contains(e.target) && !(e.target.closest && e.target.closest(".rowMore")))
-    m.style.display = "none";
+    closeRowMenu(false);
 });
 // A ⋯ overflow button for a row (e = mail item or chat).
 function moreBtn(e) {
@@ -1131,19 +1179,24 @@ function moreBtn(e) {
 
 // Which intent group a priority entry belongs to.
 const PRIO_GROUPS = [
-  { key: "pinned",  label: "PINNED",              color: "var(--gold)" },
-  { key: "reply",   label: "REPLY NEEDED",        color: "var(--red)" },
-  { key: "meeting", label: "MEETING OR DEADLINE", color: "var(--gold)" },
-  { key: "review",  label: "REVIEW / SIGN",       color: "var(--blue)" },
-  { key: "unread",  label: "UNREAD CONVERSATIONS", color: "var(--blue)" },
+  { key: "pinned",        label: "PINNED",             color: "var(--gold)" },
+  { key: "reply",         label: "REPLY NEEDED",       color: "var(--red)" },
+  { key: "meeting",       label: "MEETING / DEADLINE", color: "var(--gold)" },
+  { key: "review",        label: "REVIEW / SIGN",      color: "var(--blue)" },
+  { key: "conversations", label: "CONVERSATIONS",      color: "var(--blue)" },
+  { key: "other",         label: "OTHER",              color: "var(--faint)" },
 ];
 function entryGroup(e) {
   if (isPinned(e.id)) return "pinned";
-  if (e.kind === "msg") return "unread";
-  const s = e.item.signals || {};
-  if (s.doc) return "review";
-  if (s.meeting) return "meeting";
-  return "reply"; // actionable email defaults to needing a reply
+  if (e.kind === "msg") return "conversations";
+  const s = e.item.signals;
+  if (s) {
+    if (s.doc) return "review";
+    if (s.meeting) return "meeting";
+    if (s.reply) return "reply";
+    return "other";                              // AI ran but flagged no specific action
+  }
+  return e.item.reply_to ? "reply" : "other";    // no AI yet: repliable → reply, else other
 }
 function entryMatchesSearch(e) {
   return e.kind === "mail"
@@ -1264,6 +1317,7 @@ function priorityMsgRow(c) {
   row.appendChild(mid);
   const right = el("div", "chatRight");
   right.appendChild(el("div", "chatAgo", c.ts ? ago(c.ts) : ""));
+  if (isOverdue(c.ts)) right.appendChild(el("div", "overduePill", "OVERDUE"));
   if (c.unread > 0) right.appendChild(el("div", "chatUnread", String(c.unread)));
   const more = moreBtn(c);
   if (more) right.appendChild(more);
@@ -1553,6 +1607,13 @@ $("composeWrap").addEventListener("click", e => { if (e.target === $("composeWra
 
 $("keyBtn").addEventListener("click", () => load($("keyInput").value.trim(), true));
 $("keyInput").addEventListener("keydown", e => { if (e.key === "Enter") $("keyBtn").click(); });
+$("keyReveal").addEventListener("click", () => {
+  const inp = $("keyInput"), show = inp.type === "password";
+  inp.type = show ? "text" : "password";
+  $("keyReveal").textContent = show ? "Hide" : "Show";
+  $("keyReveal").setAttribute("aria-pressed", String(show));
+  inp.focus();
+});
 $("lockBtn").addEventListener("click", () => { localStorage.removeItem("mailbrief_key"); location.reload(); });
 
 // ===== Messages (Beeper bridge) =====
@@ -1747,10 +1808,8 @@ function switchView(which) {
   $("priorityView").style.display = isPrio ? "block" : "none";
   $("mailView").style.display = isMail ? "block" : "none";
   $("msgView").style.display = isMsg ? "block" : "none";
-  $("tabPriority").classList.toggle("on", isPrio);
-  $("tabMail").classList.toggle("on", isMail);
-  $("tabMsg").classList.toggle("on", which === "msg");
-  $("tabDM").classList.toggle("on", which === "dm");
+  [["tabPriority", isPrio], ["tabMail", isMail], ["tabMsg", which === "msg"], ["tabDM", which === "dm"]]
+    .forEach(([id, on]) => { $(id).classList.toggle("on", on); $(id).setAttribute("aria-selected", String(on)); });
   if (isMsg) $("briefStrip").classList.add("hidden"); // brief strip only on priority/mail
   if (isPrio) { renderPriority(); loadMessages(); }  // load msgs so the merge is complete
   else if (isMail) { if (BRIEF) render(); }
