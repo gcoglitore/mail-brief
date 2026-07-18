@@ -165,6 +165,16 @@
     background: none; color: var(--dim); font-size: 17px; line-height: 1; cursor: pointer; min-width: 40px; }
   .rowMore:hover { border-color: var(--line); background: var(--panel2); color: var(--text); }
   .chat .rowMore { margin-left: 4px; }
+  /* Priority toolbar: sort toggle + snoozed filter */
+  .prioTools { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .segToggle { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .segBtn { padding: 6px 13px; background: var(--panel2); color: var(--dim); border: 0;
+    font-size: 12.5px; font-weight: 700; cursor: pointer; }
+  .segBtn.on { background: var(--gold); color: #14100a; }
+  .prioFilterBtn { margin-left: auto; padding: 6px 13px; border-radius: 9px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--dim); font-size: 12.5px; font-weight: 700; cursor: pointer; }
+  .prioFilterBtn.on { color: var(--gold); border-color: var(--gold); }
+  .snzUntil { font-size: 12px; color: var(--faint); }
 
   /* full-screen email reader */
   #reader {
@@ -444,6 +454,8 @@ let FILTER = "ALL";
 let SEARCH = "";
 let VIEW = "priority";  // active top-level view: priority | mail | msg | dm
 let FLAGS = {};         // per-item pin/snooze state, synced to the DB across devices
+let PRIO_SORT = "grouped";   // grouped (by intent) | newest (flat chronological)
+let PRIO_FILTER = "active";  // active | snoozed
 
 // Case-insensitive: does the (already-lowercased) query appear in any field?
 function matchText(q) {
@@ -1014,38 +1026,127 @@ function moreBtn(e) {
   return b;
 }
 
-// Unified priority rail: attention email + unread conversations from every
-// channel, newest first, each row showing its source. This is the home view.
+// Which intent group a priority entry belongs to.
+const PRIO_GROUPS = [
+  { key: "pinned",  label: "PINNED",              color: "var(--gold)" },
+  { key: "reply",   label: "REPLY NEEDED",        color: "var(--red)" },
+  { key: "meeting", label: "MEETING OR DEADLINE", color: "var(--gold)" },
+  { key: "review",  label: "REVIEW / SIGN",       color: "var(--blue)" },
+  { key: "unread",  label: "UNREAD CONVERSATIONS", color: "var(--blue)" },
+];
+function entryGroup(e) {
+  if (isPinned(e.id)) return "pinned";
+  if (e.kind === "msg") return "unread";
+  const s = e.item.signals || {};
+  if (s.doc) return "review";
+  if (s.meeting) return "meeting";
+  return "reply"; // actionable email defaults to needing a reply
+}
+function entryMatchesSearch(e) {
+  return e.kind === "mail"
+    ? matchText(SEARCH, e.item.from_name, e.item.from_email, e.item.subject, e.item.snippet, e.item.action_summary)
+    : matchText(SEARCH, e.chat.title, e.chat.preview);
+}
+function rowFor(e) { return e.kind === "mail" ? card(e.item, "attn") : priorityMsgRow(e.chat); }
+function groupHead(label, color, n) {
+  const h = el("div", "secHead");
+  const dot = el("span", "dot"); dot.style.background = color; h.appendChild(dot);
+  h.appendChild(document.createTextNode(label + " "));
+  h.appendChild(el("span", "count", "(" + n + ")"));
+  return h;
+}
+function snoozeLabel(ts) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000), now = new Date();
+  const tmr = new Date(now); tmr.setDate(now.getDate() + 1);
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return "today " + time;
+  if (d.toDateString() === tmr.toDateString()) return "tomorrow " + time;
+  return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + " " + time;
+}
+function snoozedRow(e) {
+  const isMail = e.kind === "mail", o = isMail ? e.item : e.chat;
+  const row = el("div", "card");
+  const meta = el("div", "cMeta");
+  meta.appendChild(el("span", "cWho", isMail ? (o.from_name || o.from_email || "?") : (o.title || "?")));
+  meta.appendChild(el("span", "cSep", "·"));
+  meta.appendChild(el("span", "cSrc", isMail ? o.account : netLabel(o.network)));
+  row.appendChild(meta);
+  row.appendChild(el("div", "cPrimary", isMail ? (o.action_summary || o.subject || "(no subject)") : (o.preview || o.title || "")));
+  const foot = el("div", "cardFoot");
+  foot.appendChild(el("span", "snzUntil", "Snoozed until " + snoozeLabel(flagOf(e.id).snooze)));
+  const restore = el("button", "rowBtn", "Restore");
+  restore.addEventListener("click", ev => {
+    ev.stopPropagation(); writeFlag(e.id, { snooze: undefined }); reRenderActive();
+    showToast("Restored to Priority", { state: "ok", ms: 1600 });
+  });
+  foot.appendChild(restore);
+  row.appendChild(foot);
+  return row;
+}
+
+// Unified priority rail: attention email + unread conversations, grouped by
+// intent (or flat by "Newest"), plus a Snoozed view. The home screen.
 function renderPriority() {
   const v = $("priorityView");
   v.replaceChildren();
-  const attn = ((BRIEF && BRIEF.items) || []).filter(i => i.bucket === "attention" && !isSnoozed(entryId(i)));
-  renderBriefStrip(SEARCH ? [] : attn);
-  let entries = [];
-  attn.forEach(i => entries.push({ kind: "mail", ts: i.ts || 0, item: i, id: entryId(i) }));
+  const attnAll = ((BRIEF && BRIEF.items) || []).filter(i => i.bucket === "attention");
+  const base = [];
+  attnAll.forEach(i => base.push({ kind: "mail", ts: i.ts || 0, item: i, id: entryId(i) }));
   ((MSGS && MSGS.chats) || []).forEach(c => {
-    if (c.unread > 0) entries.push({ kind: "msg", ts: c.ts || 0, chat: c, id: entryId(c) });
+    if (c.unread > 0) base.push({ kind: "msg", ts: c.ts || 0, chat: c, id: entryId(c) });
   });
-  entries = entries.filter(e => !isSnoozed(e.id));  // snoozed items drop out until due
-  const total = entries.length;
-  if (SEARCH) {
-    entries = entries.filter(e => e.kind === "mail"
-      ? matchText(SEARCH, e.item.from_name, e.item.from_email, e.item.subject, e.item.snippet, e.item.action_summary)
-      : matchText(SEARCH, e.chat.title, e.chat.preview));
+  const active = base.filter(e => !isSnoozed(e.id));
+  const snoozed = base.filter(e => isSnoozed(e.id));
+  renderBriefStrip(SEARCH ? [] : active.filter(e => e.kind === "mail").map(e => e.item));
+  setBadge("prioBadge", active.length);
+
+  // Toolbar: sort toggle (active view) + Snoozed filter.
+  const tools = el("div", "prioTools");
+  if (PRIO_FILTER === "active") {
+    const seg = el("div", "segToggle");
+    [["grouped", "Grouped"], ["newest", "Newest"]].forEach(([m, lbl]) => {
+      const b = el("button", "segBtn" + (PRIO_SORT === m ? " on" : ""), lbl);
+      b.addEventListener("click", () => { PRIO_SORT = m; renderPriority(); });
+      seg.appendChild(b);
+    });
+    tools.appendChild(seg);
   }
-  // Pinned first, then newest first.
-  entries.sort((a, b) => {
-    const pa = isPinned(a.id), pb = isPinned(b.id);
-    if (pa !== pb) return pa ? -1 : 1;
-    return b.ts - a.ts;
-  });
-  setBadge("prioBadge", total);
+  const filt = el("button", "prioFilterBtn" + (PRIO_FILTER === "snoozed" ? " on" : ""),
+    PRIO_FILTER === "snoozed" ? "‹ Back to Priority" : ("Snoozed" + (snoozed.length ? " (" + snoozed.length + ")" : "")));
+  filt.addEventListener("click", () => { PRIO_FILTER = PRIO_FILTER === "snoozed" ? "active" : "snoozed"; renderPriority(); });
+  tools.appendChild(filt);
+  v.appendChild(tools);
+
+  if (PRIO_FILTER === "snoozed") {
+    if (!snoozed.length) { v.appendChild(el("div", "empty", "Nothing snoozed.")); return; }
+    snoozed.sort((a, b) => (flagOf(a.id).snooze || 0) - (flagOf(b.id).snooze || 0));
+    snoozed.forEach(e => v.appendChild(snoozedRow(e)));
+    return;
+  }
+
+  let entries = SEARCH ? active.filter(entryMatchesSearch) : active;
   if (!entries.length) {
     v.appendChild(el("div", "empty", SEARCH ? "No matching priority items."
       : "You're all caught up — nothing needs your attention."));
     return;
   }
-  entries.forEach(e => v.appendChild(e.kind === "mail" ? card(e.item, "attn") : priorityMsgRow(e.chat)));
+  if (PRIO_SORT === "newest") {
+    entries = entries.slice().sort((a, b) => {
+      const pa = isPinned(a.id), pb = isPinned(b.id);
+      if (pa !== pb) return pa ? -1 : 1;
+      return b.ts - a.ts;
+    });
+    entries.forEach(e => v.appendChild(rowFor(e)));
+  } else {
+    // Grouped by intent; within each group, oldest (most overdue) first.
+    PRIO_GROUPS.forEach(g => {
+      const inG = entries.filter(e => entryGroup(e) === g.key).sort((a, b) => a.ts - b.ts);
+      if (!inG.length) return;
+      v.appendChild(groupHead(g.label, g.color, inG.length));
+      inG.forEach(e => v.appendChild(rowFor(e)));
+    });
+  }
 }
 
 function priorityMsgRow(c) {
