@@ -72,6 +72,23 @@
   @keyframes tpulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
   #toast .tUndo { color: var(--gold); font-weight: 800; cursor: pointer; background: none;
     border: 0; font-size: 14px; padding: 2px 4px; }
+  /* Pin / Snooze row controls */
+  .cardFoot { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .rowActions { display: flex; gap: 6px; margin-left: auto; }
+  .iconBtn { padding: 4px 9px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel2); font-size: 13px; cursor: pointer; line-height: 1; }
+  .iconBtn:hover { border-color: var(--gold); }
+  .iconBtn.on { border-color: var(--gold); background: rgba(212,168,67,.16); }
+  .chat .rowActions { margin-top: 6px; margin-left: 0; }
+  .pinMark { font-size: 11px; }
+  .card.pinned, .chat.pinned { border-left: 3px solid var(--gold); }
+  #snoozeMenu { display: none; position: fixed; z-index: 45; min-width: 180px; padding: 6px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 10px 34px rgba(0,0,0,.5); }
+  #snoozeMenu .snzTitle { font-size: 11px; color: var(--dim); padding: 4px 8px 6px; letter-spacing: .5px; }
+  #snoozeMenu .snzOpt { display: block; width: 100%; text-align: left; padding: 9px 10px; border: 0;
+    border-radius: 8px; background: none; color: var(--text); font-size: 14px; cursor: pointer; }
+  #snoozeMenu .snzOpt:hover { background: var(--panel2); }
 
   #keyScreen { display: none; text-align: center; padding: 80px 20px; }
   #keyScreen h2 { font-size: 17px; margin-bottom: 6px; }
@@ -376,6 +393,7 @@
 </div>
 
 <div id="toast"></div>
+<div id="snoozeMenu"></div>
 
 <div id="composeWrap">
   <div id="composeSheet">
@@ -403,6 +421,7 @@ let BRIEF = null;
 let FILTER = "ALL";
 let SEARCH = "";
 let VIEW = "priority";  // active top-level view: priority | mail | msg | dm
+let FLAGS = {};         // per-item pin/snooze state, synced to the DB across devices
 
 // Case-insensitive: does the (already-lowercased) query appear in any field?
 function matchText(q) {
@@ -446,6 +465,7 @@ function card(i, cls) {
 
   const row = el("div", "row1");
   if (i.unread) row.appendChild(el("span", "unread"));
+  if (isPinned(entryId(i))) { node.classList.add("pinned"); row.appendChild(el("span", "pinMark", "📌")); }
   row.appendChild(el("span", "acct", i.account));
   row.appendChild(el("span", "from", i.from_name || i.from_email || "?"));
   row.appendChild(el("span", "ago", ago(i.ts)));
@@ -473,14 +493,16 @@ function card(i, cls) {
     });
   }
 
-  if (i.reply_to && i.msgid && i.bucket !== "junk") {
-    const btn = el("button", "replyBtn", "Reply");
-    btn.addEventListener("click", e => {
-      e.preventDefault();
-      e.stopPropagation();
-      openCompose(i);
-    });
-    node.appendChild(btn);
+  if (i.bucket !== "junk") {
+    const foot = el("div", "cardFoot");
+    if (i.reply_to && i.msgid) {
+      const btn = el("button", "replyBtn", "Reply");
+      btn.addEventListener("click", e => { e.preventDefault(); e.stopPropagation(); openCompose(i); });
+      foot.appendChild(btn);
+    }
+    const acts = actionBtns(i);
+    if (acts) foot.appendChild(acts);
+    node.appendChild(foot);
   }
   return node;
 }
@@ -868,25 +890,133 @@ function renderBriefStrip(attn) {
   });
 }
 
+// ===== Pin / Snooze (synced to the DB so they carry across devices) =====
+function entryId(e) {
+  const raw = e && e.msgid ? "mail:" + e.msgid : (e && e.id ? "msg:" + e.id : "");
+  return raw ? raw.replace(/[.#$\[\]\/]/g, "_") : null; // sanitize for a DB key
+}
+function flagOf(id) { return (id && FLAGS[id]) || {}; }
+function isPinned(id) { return !!flagOf(id).pin; }
+function isSnoozed(id) { const s = flagOf(id).snooze; return !!s && s > Date.now() / 1000; }
+
+async function loadFlags() {
+  const key = localStorage.getItem("mailbrief_key");
+  if (!key) return;
+  try {
+    const r = await fetch(DB + "/briefs/" + encodeURIComponent(key) + "/flags.json");
+    const d = await r.json();
+    FLAGS = d && typeof d === "object" ? d : {};
+    localStorage.setItem("mailbrief_flags", JSON.stringify(FLAGS));
+  } catch (e) {
+    try { FLAGS = JSON.parse(localStorage.getItem("mailbrief_flags") || "{}"); } catch (_) { FLAGS = {}; }
+  }
+}
+function writeFlag(id, patch) {
+  if (!id) return;
+  const next = Object.assign({}, FLAGS[id], patch);
+  if (!next.pin) delete next.pin;
+  if (!next.snooze) delete next.snooze;
+  if (Object.keys(next).length) FLAGS[id] = next; else delete FLAGS[id];
+  try { localStorage.setItem("mailbrief_flags", JSON.stringify(FLAGS)); } catch (_) {}
+  const key = localStorage.getItem("mailbrief_key");
+  if (!key) return;
+  fetch(DB + "/briefs/" + encodeURIComponent(key) + "/flags/" + encodeURIComponent(id) + ".json", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(FLAGS[id] || null),
+  }).catch(() => {});
+}
+function reRenderActive() {
+  if (VIEW === "priority") renderPriority();
+  else if (VIEW === "mail") { if (BRIEF) render(); }
+  else renderMessages();
+}
+function togglePin(id) {
+  const pin = !isPinned(id);
+  writeFlag(id, { pin });
+  reRenderActive();
+  showToast(pin ? "Pinned to top" : "Unpinned", { state: "ok", ms: 1500 });
+}
+function atHour(h, addDays) {
+  const d = new Date();
+  d.setDate(d.getDate() + (addDays || 0));
+  d.setHours(h, 0, 0, 0);
+  if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1);
+  return Math.floor(d.getTime() / 1000);
+}
+const SNOOZE_PRESETS = [
+  { label: "1 hour", at: () => Math.floor(Date.now() / 1000) + 3600 },
+  { label: "This evening", at: () => atHour(18) },
+  { label: "Tomorrow morning", at: () => atHour(9, 1) },
+  { label: "Next week", at: () => atHour(9, 7) },
+];
+function openSnoozeMenu(id, anchorBtn) {
+  const menu = $("snoozeMenu");
+  menu.replaceChildren();
+  menu.appendChild(el("div", "snzTitle", "Snooze until…"));
+  SNOOZE_PRESETS.forEach(p => {
+    const b = el("button", "snzOpt", p.label);
+    b.addEventListener("click", () => {
+      writeFlag(id, { snooze: p.at() });
+      menu.style.display = "none";
+      reRenderActive();
+      showToast("Snoozed — " + p.label.toLowerCase(), {
+        state: "ok", ms: 4000,
+        undo: () => { writeFlag(id, { snooze: undefined }); reRenderActive(); },
+      });
+    });
+    menu.appendChild(b);
+  });
+  menu.style.display = "block";
+  const r = anchorBtn.getBoundingClientRect();
+  menu.style.top = Math.min(r.bottom + 6, window.innerHeight - menu.offsetHeight - 10) + "px";
+  menu.style.left = Math.min(r.left, window.innerWidth - 190) + "px";
+}
+document.addEventListener("click", e => {
+  const m = $("snoozeMenu");
+  if (m && m.style.display === "block" && !m.contains(e.target) && !e.target.classList.contains("snzBtn"))
+    m.style.display = "none";
+});
+// Pin + Snooze controls for a row (e = mail item or chat).
+function actionBtns(e) {
+  const id = entryId(e);
+  if (!id) return null;
+  const wrap = el("div", "rowActions");
+  const pin = el("button", "iconBtn" + (isPinned(id) ? " on" : ""), "📌");
+  pin.title = isPinned(id) ? "Unpin" : "Pin to top";
+  pin.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation(); togglePin(id); });
+  const snz = el("button", "iconBtn snzBtn", "⏰");
+  snz.title = "Snooze";
+  snz.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation(); openSnoozeMenu(id, snz); });
+  wrap.appendChild(pin);
+  wrap.appendChild(snz);
+  return wrap;
+}
+
 // Unified priority rail: attention email + unread conversations from every
 // channel, newest first, each row showing its source. This is the home view.
 function renderPriority() {
   const v = $("priorityView");
   v.replaceChildren();
-  const attn = ((BRIEF && BRIEF.items) || []).filter(i => i.bucket === "attention");
+  const attn = ((BRIEF && BRIEF.items) || []).filter(i => i.bucket === "attention" && !isSnoozed(entryId(i)));
   renderBriefStrip(SEARCH ? [] : attn);
   let entries = [];
-  attn.forEach(i => entries.push({ kind: "mail", ts: i.ts || 0, item: i }));
+  attn.forEach(i => entries.push({ kind: "mail", ts: i.ts || 0, item: i, id: entryId(i) }));
   ((MSGS && MSGS.chats) || []).forEach(c => {
-    if (c.unread > 0) entries.push({ kind: "msg", ts: c.ts || 0, chat: c });
+    if (c.unread > 0) entries.push({ kind: "msg", ts: c.ts || 0, chat: c, id: entryId(c) });
   });
+  entries = entries.filter(e => !isSnoozed(e.id));  // snoozed items drop out until due
   const total = entries.length;
   if (SEARCH) {
     entries = entries.filter(e => e.kind === "mail"
       ? matchText(SEARCH, e.item.from_name, e.item.from_email, e.item.subject, e.item.snippet, e.item.action_summary)
       : matchText(SEARCH, e.chat.title, e.chat.preview));
   }
-  entries.sort((a, b) => b.ts - a.ts);
+  // Pinned first, then newest first.
+  entries.sort((a, b) => {
+    const pa = isPinned(a.id), pb = isPinned(b.id);
+    if (pa !== pb) return pa ? -1 : 1;
+    return b.ts - a.ts;
+  });
   setBadge("prioBadge", total);
   if (!entries.length) {
     v.appendChild(el("div", "empty", SEARCH ? "No matching priority items."
@@ -897,11 +1027,16 @@ function renderPriority() {
 }
 
 function priorityMsgRow(c) {
-  const row = el("div", "chat");
+  const id = entryId(c);
+  const row = el("div", "chat" + (isPinned(id) ? " pinned" : ""));
   row.appendChild(el("span", "net " + netClass(c.network), netLabel(c.network)));
   const mid = el("div", "chatMid");
-  mid.appendChild(el("div", "chatTitle", c.title || "(no title)"));
+  const title = el("div", "chatTitle", c.title || "(no title)");
+  if (isPinned(id)) title.textContent = "📌 " + title.textContent;
+  mid.appendChild(title);
   mid.appendChild(el("div", "chatPrev", c.preview || ""));
+  const acts = actionBtns(c);
+  if (acts) mid.appendChild(acts);
   row.appendChild(mid);
   const right = el("div", "chatRight");
   right.appendChild(el("div", "chatAgo", c.ts ? ago(c.ts) : ""));
@@ -916,8 +1051,8 @@ function render() {
   updateAppBadge();
   const all = BRIEF.items || [];
   const items = all.filter(i => FILTER === "ALL" || i.account === FILTER);
-  const attn = items.filter(i => i.bucket === "attention");
-  const fyi  = items.filter(i => i.bucket === "fyi");
+  const attn = items.filter(i => i.bucket === "attention" && !isSnoozed(entryId(i)));
+  const fyi  = items.filter(i => i.bucket === "fyi" && !isSnoozed(entryId(i)));
   const junk = items.filter(i => i.bucket === "junk");
 
   if (VIEW === "priority") renderPriority();
@@ -995,6 +1130,7 @@ async function load(key, fromButton) {
     localStorage.setItem("mailbrief_cache", JSON.stringify(data));
     $("keyScreen").style.display = "none";
     $("app").style.display = "block";
+    await loadFlags();   // pins/snoozes before first paint
     render();
     updateNetBar(false);
     flushOutbox();

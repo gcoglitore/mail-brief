@@ -1,0 +1,14 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "briefs": {
+      "$token": {
+        ".read": true,
+        "subs": { ".write": true },
+        "msg_outbox": { ".write": true },
+        "flags": { ".write": true }
+      }
+    }
+  }
+}
