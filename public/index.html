@@ -233,7 +233,24 @@
     cursor: pointer; padding: 12px 14px 12px 0; letter-spacing: .5px; min-height: 44px;
   }
   #readerMeta { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; }
-  #readerSubject { font-size: 18px; font-weight: 700; line-height: 1.3; margin: 6px 0 14px; }
+  #readerSubject { font-size: 18px; font-weight: 700; line-height: 1.3; margin: 6px 0 12px; }
+  /* Reader context: why-priority chips, attachments, thread */
+  #readerWhy, #readerAttach { display: none; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .whyChip { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+    background: var(--panel2); border: 1px solid var(--line); color: var(--dim); }
+  .whyChip.act { color: var(--gold); border-color: rgba(212,168,67,.5); }
+  .whyChip.whenChip { color: var(--blue); border-color: rgba(74,134,232,.5); }
+  .attChip { font-size: 12px; padding: 5px 10px; border-radius: 8px; background: var(--panel2);
+    border: 1px solid var(--line); color: var(--text); }
+  #readerThread { display: none; margin: 4px 0 14px; }
+  #readerThread .threadHdr { font-size: 10px; letter-spacing: 1.5px; color: var(--dim);
+    font-weight: 800; margin-bottom: 8px; }
+  .threadPrev { border-left: 2px solid var(--line); padding: 4px 0 6px 12px; margin-bottom: 8px; }
+  .threadPrevHead { display: flex; gap: 8px; font-size: 12px; }
+  .threadPrevFrom { font-weight: 700; color: var(--dim); }
+  .threadPrevAgo { color: var(--faint); margin-left: auto; }
+  .threadPrevSnip { font-size: 12.5px; color: var(--faint); margin-top: 2px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   #readerBody {
     white-space: pre-wrap; font-size: 14.5px; line-height: 1.55; word-break: break-word;
     border-top: 1px solid var(--line); padding-top: 14px;
@@ -507,12 +524,17 @@
       <span class="ago" id="readerAgo"></span>
     </div>
     <div id="readerSubject"></div>
+    <div id="readerWhy"></div>
+    <div id="readerAttach"></div>
     <div id="readerActions">
       <button class="replyBtn" id="readerDone" style="margin-top:0" title="Archives this email out of your inbox (reversible)">✓ Done</button>
       <button class="replyBtn" id="readerReply" style="margin-top:0">Reply</button>
       <button class="replyBtn" id="readerDraft" style="margin-top:0">✨ Draft</button>
+      <button class="replyBtn" id="readerSnooze" style="margin-top:0">⏰ Snooze</button>
+      <button class="replyBtn" id="readerPin" style="margin-top:0">📌 Pin</button>
       <a class="openLink" id="readerOpen" target="_blank" rel="noopener">Open in mailbox ↗</a>
     </div>
+    <div id="readerThread"></div>
     <div id="readerBody"></div>
   </div>
 </div>
@@ -738,6 +760,24 @@ function markRead(i) {
   }).catch(() => {}); // best-effort; the next refresh reconciles anyway
 }
 
+function fmtSize(n) {
+  return n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : n > 1024 ? Math.round(n / 1024) + " KB" : n + " B";
+}
+function whyPriority(i) {
+  const s = i.signals || {}, out = [];
+  if (s.reply) out.push("needs a reply");
+  if (s.meeting) out.push("about a meeting");
+  if (s.doc) out.push("document to review");
+  if (isOverdue(i.ts)) out.push("overdue");
+  return out;
+}
+// Light date/time detection for a "when" chip — best-effort, not a parser.
+function detectWhen(text) {
+  if (!text) return null;
+  const m = text.match(/\b(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\b|\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b|\b(?:today|tomorrow)\b|\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/i);
+  return m ? m[0] : null;
+}
+
 function openReader(i) {
   readerItem = i;
   markRead(i);
@@ -746,10 +786,45 @@ function openReader(i) {
   $("readerAgo").textContent = ago(i.ts);
   $("readerSubject").textContent = i.subject || "(no subject)";
   $("readerBody").textContent = i.body || "";
+
+  // Why this is priority + a detected date, as chips
+  const why = $("readerWhy"); why.replaceChildren();
+  if (i.action_summary) why.appendChild(el("span", "whyChip act", "➜ " + i.action_summary));
+  whyPriority(i).forEach(r => why.appendChild(el("span", "whyChip", r)));
+  const when = detectWhen(i.body || i.action_summary || "");
+  if (when) why.appendChild(el("span", "whyChip whenChip", "📅 " + when));
+  why.style.display = why.children.length ? "flex" : "none";
+
+  // Attachments
+  const at = $("readerAttach"); at.replaceChildren();
+  (i.attachments || []).forEach(a => at.appendChild(
+    el("span", "attChip", "📎 " + a.name + (a.size ? " · " + fmtSize(a.size) : ""))));
+  at.style.display = at.children.length ? "flex" : "none";
+
+  // Earlier in this thread
+  const th = $("readerThread"); th.replaceChildren();
+  if (i.thread && i.thread.length) {
+    th.appendChild(el("div", "threadHdr", "EARLIER IN THIS THREAD"));
+    i.thread.forEach(m => {
+      const row = el("div", "threadPrev");
+      const head = el("div", "threadPrevHead");
+      head.appendChild(el("span", "threadPrevFrom", m.from || "?"));
+      head.appendChild(el("span", "threadPrevAgo", m.ts ? ago(m.ts) : ""));
+      row.appendChild(head);
+      row.appendChild(el("div", "threadPrevSnip", m.snippet || ""));
+      th.appendChild(row);
+    });
+    th.style.display = "block";
+  } else { th.style.display = "none"; }
+
   const link = safeLink(i.link);
   $("readerOpen").style.display = link ? "inline" : "none";
   if (link) $("readerOpen").href = link;
   $("readerReply").style.display = (i.reply_to && i.msgid) ? "inline-block" : "none";
+  const id = entryId(i);
+  $("readerPin").textContent = isPinned(id) ? "📌 Unpin" : "📌 Pin";
+  $("readerPin").style.display = id ? "inline-block" : "none";
+  $("readerSnooze").style.display = id ? "inline-block" : "none";
   $("reader").style.display = "block";
   $("reader").scrollTop = 0;
 }
@@ -1639,6 +1714,13 @@ $("readerBack").addEventListener("click", closeReader);
 })();
 $("readerReply").addEventListener("click", () => { if (readerItem) openCompose(readerItem); });
 $("readerDraft").addEventListener("click", () => { if (readerItem) draftReply(readerItem); });
+$("readerSnooze").addEventListener("click", () => { if (readerItem) openRowMenu(readerItem, $("readerSnooze")); });
+$("readerPin").addEventListener("click", () => {
+  if (!readerItem) return;
+  const id = entryId(readerItem);
+  togglePin(id);
+  $("readerPin").textContent = isPinned(id) ? "📌 Unpin" : "📌 Pin";
+});
 
 // AI-drafted replies in Gio's voice: open the compose sheet and fill it with
 // tappable suggestions from the function. Each suggestion drops into the body
