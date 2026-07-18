@@ -146,6 +146,25 @@
     display: flex; align-items: baseline; gap: 6px; }
   .actionSum .actionDot { font-size: 11px; opacity: .8; }
   .expandHint { color: var(--faint); font-size: 11px; margin-top: 5px; }
+  /* Redesigned row: quiet meta, dominant action, quiet context */
+  .cMeta { display: flex; align-items: center; gap: 6px; font-size: 11.5px;
+    color: var(--faint); letter-spacing: .2px; text-transform: uppercase; }
+  .cMeta .cWho { color: var(--dim); font-weight: 700; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; max-width: 45%; }
+  .cMeta .cSrc { color: var(--gold); font-weight: 700; }
+  .cMeta .cSep { opacity: .5; }
+  .cMeta .cTime { margin-left: auto; white-space: nowrap; }
+  .cPrimary { font-size: 15px; font-weight: 700; line-height: 1.35; margin-top: 6px; color: var(--text); }
+  .cPrimary.act { color: var(--gold); }
+  .cSecondary { font-size: 12.5px; color: var(--dim); margin-top: 3px;
+    display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .rowBtn { padding: 6px 14px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); font-size: 13px; font-weight: 700; cursor: pointer; }
+  .rowBtn:hover { border-color: var(--gold); }
+  .rowMore { margin-left: auto; padding: 6px 10px; border-radius: 8px; border: 1px solid transparent;
+    background: none; color: var(--dim); font-size: 17px; line-height: 1; cursor: pointer; min-width: 40px; }
+  .rowMore:hover { border-color: var(--line); background: var(--panel2); color: var(--text); }
+  .chat .rowMore { margin-left: 4px; }
 
   /* full-screen email reader */
   #reader {
@@ -164,7 +183,9 @@
     white-space: pre-wrap; font-size: 14.5px; line-height: 1.55; word-break: break-word;
     border-top: 1px solid var(--line); padding-top: 14px;
   }
-  #readerActions { display: flex; gap: 14px; align-items: center; margin: 18px 0 8px; }
+  #readerActions { display: flex; gap: 14px; align-items: center; margin: 0 0 8px;
+    position: sticky; top: 0; z-index: 3; background: var(--bg);
+    padding: 12px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   .openLink { color: var(--blue); font-size: 13px; text-decoration: none; }
   #readerDone { color: var(--green); border-color: var(--green); }
   #readerDraft { color: var(--gold); border-color: var(--gold); }
@@ -302,12 +323,13 @@
   }
   #deskPane .dpIcon { font-size: 34px; display: block; margin-bottom: 12px; opacity: .8; }
   /* ---- Desktop two-pane layout (wide screens only; phone view untouched) ---- */
+  /* Two-pane only once signed in — the login stays centered full-viewport. */
   @media (min-width: 980px) {
-    .wrap { max-width: var(--list-w); margin: 0; min-height: 100vh;
+    body.signed-in .wrap { max-width: var(--list-w); margin: 0; min-height: 100vh;
       border-right: 1px solid var(--line); padding: 22px 22px 60px 30px; }
-    #reader, #thread { left: var(--list-w); }
+    body.signed-in #reader, body.signed-in #thread { left: var(--list-w); }
     #readerInner { max-width: 680px; }
-    #deskPane { display: flex; flex-direction: column; }
+    body.signed-in #deskPane { display: flex; flex-direction: column; }
   }
   #threadSend { padding: 0 18px; border: 0; border-radius: 999px; background: var(--gold);
     color: #14100a; font-weight: 700; cursor: pointer; }
@@ -336,7 +358,7 @@
     <div id="netBar"></div>
     <div id="viewTabs">
       <button id="tabPriority" class="vtab on">Priority<span id="prioBadge" class="tabBadge"></span></button>
-      <button id="tabMail" class="vtab">Mail<span id="mailBadge" class="tabBadge"></span></button>
+      <button id="tabMail" class="vtab">All Mail<span id="mailBadge" class="tabBadge"></span></button>
       <button id="tabMsg" class="vtab">Texts<span id="msgBadge" class="tabBadge"></span></button>
       <button id="tabDM" class="vtab">DMs<span id="dmBadge" class="tabBadge"></span></button>
     </div>
@@ -463,29 +485,28 @@ function card(i, cls) {
     node.addEventListener("click", () => markRead(i));
   }
 
-  const row = el("div", "row1");
-  if (i.unread) row.appendChild(el("span", "unread"));
-  if (isPinned(entryId(i))) { node.classList.add("pinned"); row.appendChild(el("span", "pinMark", "📌")); }
-  row.appendChild(el("span", "acct", i.account));
-  row.appendChild(el("span", "from", i.from_name || i.from_email || "?"));
-  row.appendChild(el("span", "ago", ago(i.ts)));
-  if (i.stale) { const s = el("span", "stalePill", "STALE"); s.title = "This account didn't refresh last time — showing your last known mail."; row.appendChild(s); }
-  node.appendChild(row);
+  const id = entryId(i);
+  if (isPinned(id)) node.classList.add("pinned");
 
-  node.appendChild(el("div", "subj", i.subject || "(no subject)"));
-  // Lead with the AI action summary ("what do they need") when we have it;
-  // fall back to the raw snippet otherwise.
-  if (i.action_summary) {
-    const a = el("div", "actionSum");
-    a.appendChild(el("span", "actionDot", "➜"));
-    a.appendChild(document.createTextNode(i.action_summary));
-    node.appendChild(a);
-  } else if (i.snippet) {
-    node.appendChild(el("div", "snip", i.snippet));
-  }
+  // Meta line — sender · source · time (quiet)
+  const meta = el("div", "cMeta");
+  if (i.unread) meta.appendChild(el("span", "unread"));
+  if (isPinned(id)) meta.appendChild(el("span", "pinMark", "📌"));
+  meta.appendChild(el("span", "cWho", i.from_name || i.from_email || "?"));
+  meta.appendChild(el("span", "cSep", "·"));
+  meta.appendChild(el("span", "cSrc", i.account));
+  meta.appendChild(el("span", "cSep", "·"));
+  meta.appendChild(el("span", "cTime", ago(i.ts)));
+  if (i.stale) { const s = el("span", "stalePill", "STALE"); s.title = "This account didn't refresh last time — showing your last known mail."; meta.appendChild(s); }
+  node.appendChild(meta);
+
+  // Primary line — the requested action, dominant (gold when AI-summarized)
+  node.appendChild(el("div", "cPrimary" + (i.action_summary ? " act" : ""), i.action_summary || i.subject || "(no subject)"));
+  // Secondary line — quieter context (subject, or snippet when no summary)
+  const secondary = i.action_summary ? (i.subject || "") : (i.snippet || "");
+  if (secondary) node.appendChild(el("div", "cSecondary", secondary));
 
   if (hasBody) {
-    node.appendChild(el("div", "expandHint", "tap to read"));
     node.style.cursor = "pointer";
     node.addEventListener("click", e => {
       if (e.target.closest("a") || e.target.closest("button")) return;
@@ -496,12 +517,17 @@ function card(i, cls) {
   if (i.bucket !== "junk") {
     const foot = el("div", "cardFoot");
     if (i.reply_to && i.msgid) {
-      const btn = el("button", "replyBtn", "Reply");
-      btn.addEventListener("click", e => { e.preventDefault(); e.stopPropagation(); openCompose(i); });
-      foot.appendChild(btn);
+      const rb = el("button", "rowBtn", "Reply");
+      rb.addEventListener("click", e => { e.preventDefault(); e.stopPropagation(); openCompose(i); });
+      foot.appendChild(rb);
     }
-    const acts = actionBtns(i);
-    if (acts) foot.appendChild(acts);
+    if (i.msgid) {
+      const db = el("button", "rowBtn", "Done");
+      db.addEventListener("click", e => { e.preventDefault(); e.stopPropagation(); archiveItem(i); });
+      foot.appendChild(db);
+    }
+    const more = moreBtn(i);
+    if (more) foot.appendChild(more);
     node.appendChild(foot);
   }
   return node;
@@ -621,35 +647,39 @@ async function commitArchive(i, idx) {
   }
 }
 
-// "Clear all": archive every email currently shown in Needs Attention (respects
-// the account filter). Files them to Archive/All Mail — reversible, not deleted.
-// One bulk call per account, so 50 emails = a couple of requests, not 50.
-async function archiveAllAttention() {
+// "Archive all": file every email currently shown in Needs Attention (respects
+// the account filter) to Archive/All Mail — reversible, not deleted. Optimistic
+// with a 6s Undo; the actual bulk call (one request per account) is deferred so
+// Undo needs no round-trip.
+function archiveAllAttention() {
   if (!BRIEF || !BRIEF.items) return;
   const targets = BRIEF.items.filter(i =>
-    i.bucket === "attention" && (FILTER === "ALL" || i.account === FILTER));
+    i.bucket === "attention" && !isSnoozed(entryId(i)) && (FILTER === "ALL" || i.account === FILTER));
   if (!targets.length) return;
   const scope = FILTER === "ALL" ? "" : " in " + FILTER;
-  if (!confirm("Archive all " + targets.length + " emails in Needs Attention" + scope +
-    "?\n\nThey move to your Archive (not deleted) and you can still find them in your mailbox.")) return;
+  if (!confirm("Archive " + targets.length + " attention email" + (targets.length === 1 ? "" : "s") + scope + "?")) return;
 
-  const key = localStorage.getItem("mailbrief_key");
   const removed = targets.slice();
-  removed.forEach(i => {
-    const idx = BRIEF.items.indexOf(i);
-    if (idx >= 0) BRIEF.items.splice(idx, 1);
-  });
-  try { localStorage.setItem("mailbrief_cache", JSON.stringify(BRIEF)); } catch (e) {}
+  const positions = removed.map(i => BRIEF.items.indexOf(i));
+  removed.forEach(i => { const idx = BRIEF.items.indexOf(i); if (idx >= 0) BRIEF.items.splice(idx, 1); });
+  cacheBrief();
   closeReader();
   render();
-  updateNetBar(undefined, "Archiving " + removed.length + "…");
-
-  // Group by account and send one bulk archive request each.
-  const byAccount = {};
-  removed.forEach(i => {
-    if (!i.msgid) return; // demo/no-id items can't sync
-    (byAccount[i.account] = byAccount[i.account] || []).push(i.msgid);
+  showToast("Archived " + removed.length, {
+    state: "ok", ms: 6000,
+    undo: () => {
+      removed.forEach((i, n) => BRIEF.items.splice(Math.min(positions[n], BRIEF.items.length), 0, i));
+      cacheBrief(); render();
+    },
+    onExpire: () => commitArchiveAll(removed),
   });
+}
+
+async function commitArchiveAll(removed) {
+  const key = localStorage.getItem("mailbrief_key");
+  const byAccount = {};
+  removed.forEach(i => { if (i.msgid) (byAccount[i.account] = byAccount[i.account] || []).push(i.msgid); });
+  showToast("Archiving " + removed.length + "…", { state: "send", ms: 8000 });
   const failed = [];
   for (const account of Object.keys(byAccount)) {
     try {
@@ -658,22 +688,15 @@ async function archiveAllAttention() {
         body: JSON.stringify({ key, action: "archiveall", account, msgids: byAccount[account] }),
       });
       const d = await r.json().catch(() => ({}));
-      if (!(r.ok && typeof d.archived === "number")) {
-        failed.push(...removed.filter(i => i.account === account && i.msgid));
-      }
-    } catch (e) {
-      failed.push(...removed.filter(i => i.account === account && i.msgid));
-    }
+      if (!(r.ok && typeof d.archived === "number")) failed.push(...removed.filter(i => i.account === account && i.msgid));
+    } catch (e) { failed.push(...removed.filter(i => i.account === account && i.msgid)); }
   }
   if (failed.length) {
-    failed.forEach(i => BRIEF.items.push(i));
-    try { localStorage.setItem("mailbrief_cache", JSON.stringify(BRIEF)); } catch (e) {}
-    render();
-    updateNetBar(undefined, failed.length + " couldn't be archived — still in your inbox");
-    setTimeout(() => updateNetBar(), 6000);
+    failed.forEach(i => { if (BRIEF && BRIEF.items && BRIEF.items.indexOf(i) < 0) BRIEF.items.push(i); });
+    cacheBrief(); render();
+    showToast(failed.length + " couldn't be archived — back in your inbox", { state: "fail", ms: 5000 });
   } else {
-    updateNetBar(undefined, "Archived " + removed.length + " ✓");
-    setTimeout(() => updateNetBar(), 3000);
+    showToast("Archived " + removed.length + " ✓", { state: "ok", ms: 1600 });
   }
 }
 
@@ -838,7 +861,7 @@ function section(parent, label, color, items, cls, emptyText, onClearAll) {
   head.appendChild(document.createTextNode(label + " "));
   head.appendChild(el("span", "count", "(" + items.length + ")"));
   if (onClearAll && items.length) {
-    const btn = el("button", "clearAllBtn", "Clear all");
+    const btn = el("button", "clearAllBtn", "Archive all (" + items.length + ")");
     btn.addEventListener("click", onClearAll);
     head.appendChild(btn);
   }
@@ -949,47 +972,46 @@ const SNOOZE_PRESETS = [
   { label: "Tomorrow morning", at: () => atHour(9, 1) },
   { label: "Next week", at: () => atHour(9, 7) },
 ];
-function openSnoozeMenu(id, anchorBtn) {
+function snoozeTo(id, p) {
+  writeFlag(id, { snooze: p.at() });
+  reRenderActive();
+  showToast("Snoozed — " + p.label.toLowerCase(), {
+    state: "ok", ms: 4000,
+    undo: () => { writeFlag(id, { snooze: undefined }); reRenderActive(); },
+  });
+}
+// Overflow (⋯) menu holding the low-frequency row actions: pin + snooze.
+function openRowMenu(e, anchorBtn) {
+  const id = entryId(e);
+  if (!id) return;
   const menu = $("snoozeMenu");
   menu.replaceChildren();
+  const pinOpt = el("button", "snzOpt", isPinned(id) ? "Unpin" : "Pin to top");
+  pinOpt.addEventListener("click", () => { menu.style.display = "none"; togglePin(id); });
+  menu.appendChild(pinOpt);
   menu.appendChild(el("div", "snzTitle", "Snooze until…"));
   SNOOZE_PRESETS.forEach(p => {
     const b = el("button", "snzOpt", p.label);
-    b.addEventListener("click", () => {
-      writeFlag(id, { snooze: p.at() });
-      menu.style.display = "none";
-      reRenderActive();
-      showToast("Snoozed — " + p.label.toLowerCase(), {
-        state: "ok", ms: 4000,
-        undo: () => { writeFlag(id, { snooze: undefined }); reRenderActive(); },
-      });
-    });
+    b.addEventListener("click", () => { menu.style.display = "none"; snoozeTo(id, p); });
     menu.appendChild(b);
   });
   menu.style.display = "block";
   const r = anchorBtn.getBoundingClientRect();
   menu.style.top = Math.min(r.bottom + 6, window.innerHeight - menu.offsetHeight - 10) + "px";
-  menu.style.left = Math.min(r.left, window.innerWidth - 190) + "px";
+  menu.style.left = Math.max(8, Math.min(r.right - 190, window.innerWidth - 200)) + "px";
 }
 document.addEventListener("click", e => {
   const m = $("snoozeMenu");
-  if (m && m.style.display === "block" && !m.contains(e.target) && !e.target.classList.contains("snzBtn"))
+  if (m && m.style.display === "block" && !m.contains(e.target) && !e.target.classList.contains("rowMore"))
     m.style.display = "none";
 });
-// Pin + Snooze controls for a row (e = mail item or chat).
-function actionBtns(e) {
-  const id = entryId(e);
-  if (!id) return null;
-  const wrap = el("div", "rowActions");
-  const pin = el("button", "iconBtn" + (isPinned(id) ? " on" : ""), "📌");
-  pin.title = isPinned(id) ? "Unpin" : "Pin to top";
-  pin.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation(); togglePin(id); });
-  const snz = el("button", "iconBtn snzBtn", "⏰");
-  snz.title = "Snooze";
-  snz.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation(); openSnoozeMenu(id, snz); });
-  wrap.appendChild(pin);
-  wrap.appendChild(snz);
-  return wrap;
+// A ⋯ overflow button for a row (e = mail item or chat).
+function moreBtn(e) {
+  if (!entryId(e)) return null;
+  const b = el("button", "rowMore", "⋯");
+  b.title = "More"; b.setAttribute("aria-label", "More actions");
+  b.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation(); openRowMenu(e, b); });
+  return b;
 }
 
 // Unified priority rail: attention email + unread conversations from every
@@ -1035,12 +1057,12 @@ function priorityMsgRow(c) {
   if (isPinned(id)) title.textContent = "📌 " + title.textContent;
   mid.appendChild(title);
   mid.appendChild(el("div", "chatPrev", c.preview || ""));
-  const acts = actionBtns(c);
-  if (acts) mid.appendChild(acts);
   row.appendChild(mid);
   const right = el("div", "chatRight");
   right.appendChild(el("div", "chatAgo", c.ts ? ago(c.ts) : ""));
   if (c.unread > 0) right.appendChild(el("div", "chatUnread", String(c.unread)));
+  const more = moreBtn(c);
+  if (more) right.appendChild(more);
   row.appendChild(right);
   row.addEventListener("click", () => openThread(c));
   return row;
@@ -1130,6 +1152,7 @@ async function load(key, fromButton) {
     localStorage.setItem("mailbrief_cache", JSON.stringify(data));
     $("keyScreen").style.display = "none";
     $("app").style.display = "block";
+    document.body.classList.add("signed-in");
     await loadFlags();   // pins/snoozes before first paint
     render();
     updateNetBar(false);
@@ -1146,6 +1169,7 @@ async function load(key, fromButton) {
       BRIEF = JSON.parse(cached);
       $("keyScreen").style.display = "none";
       $("app").style.display = "block";
+    document.body.classList.add("signed-in");
       render();
       updateNetBar(true);
       return;
@@ -1164,6 +1188,7 @@ async function load(key, fromButton) {
   if (haveSavedKey) {
     $("keyScreen").style.display = "none";
     $("app").style.display = "block";
+    document.body.classList.add("signed-in");
     updateNetBar(undefined, "Connecting…");
     setTimeout(() => load(key, false), 4000);
     return;
@@ -1175,6 +1200,7 @@ async function load(key, fromButton) {
 function showKeyScreen() {
   $("app").style.display = "none";
   $("keyScreen").style.display = "block";
+  document.body.classList.remove("signed-in");
 }
 
 async function updateNow() {
