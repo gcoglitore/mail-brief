@@ -14,6 +14,7 @@ import email
 import email.header
 import email.utils
 import html as html_lib
+from html.parser import HTMLParser
 import imaplib
 import json
 import os
@@ -27,7 +28,7 @@ DB_URL = "https://mail-brief-gio-default-rtdb.firebaseio.com"
 LOOKBACK_DAYS = 3
 MAX_PER_ACCOUNT = 60
 SNIPPET_LEN = 180
-BODY_LEN = 6000  # full readable text cap; junk items never carry a body
+BODY_LEN = 2500  # readable-text cap after quote/signature stripping; junk carries none
 
 JUNK_DOMAINS = (
     "goalphalabs.com", "orbitz.com", "reply.ebay.com", "learn.heygen.com",
@@ -55,8 +56,77 @@ def decode_header(value):
     return " ".join(out).strip()
 
 
+class _HTMLToText(HTMLParser):
+    """Convert HTML to readable text with a real parser (handles nested tags and
+    entities), inserting newlines at block boundaries and skipping style/script."""
+    _BLOCK = {"p", "div", "br", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6",
+              "table", "ul", "ol", "blockquote", "section", "article", "header", "footer"}
+    _SKIP = {"style", "script", "head", "title", "noscript"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._out = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._SKIP:
+            self._skip_depth += 1
+        elif tag == "br" or tag in self._BLOCK:
+            self._out.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in self._SKIP and self._skip_depth:
+            self._skip_depth -= 1
+        elif tag in self._BLOCK:
+            self._out.append("\n")
+
+    def handle_data(self, data):
+        if not self._skip_depth:
+            self._out.append(data)
+
+    def text(self):
+        return "".join(self._out)
+
+
+def html_to_text(html):
+    parser = _HTMLToText()
+    try:
+        parser.feed(html)
+        return parser.text()
+    except Exception:  # never let a malformed document break the pipeline
+        return html_lib.unescape(re.sub(r"<[^>]+>", " ", html))
+
+
+# High-precision markers for where a quoted reply chain / signature begins. We cut
+# at the earliest match so the brief shows only the new content the sender wrote.
+_REPLY_MARKERS = [
+    re.compile(r"^\s*On\b.{0,200}\bwrote:\s*$", re.M),          # Gmail/Apple reply
+    re.compile(r"^\s*-{2,}\s*Original Message\s*-{2,}", re.M | re.I),  # Outlook
+    re.compile(r"^\s*_{5,}\s*$", re.M),                          # Outlook web divider
+    re.compile(r"^\s*From:\s.+\bSent:\s", re.M | re.S),          # forwarded header block
+    re.compile(r"^\s*-{2}\s*$", re.M),                           # standard signature "-- "
+    re.compile(r"^\s*Sent from my \w+", re.M | re.I),
+    re.compile(r"^\s*Get Outlook for \w+", re.M | re.I),
+]
+
+
+def strip_reply_chrome(text):
+    """Trim quoted reply chains and signatures, but never trim a body down to
+    almost nothing (guards against a marker matching high in a short message)."""
+    cut = len(text)
+    for rx in _REPLY_MARKERS:
+        m = rx.search(text)
+        if m:
+            cut = min(cut, m.start())
+    trimmed = text[:cut].rstrip()
+    # Only refuse to trim when nothing readable would remain (e.g. a message that
+    # is entirely a quoted chain) — short-but-real replies must still be trimmed.
+    return trimmed if trimmed else text.strip()
+
+
 def extract_text(msg):
-    """Extract readable plain text (paragraphs preserved) from a message."""
+    """Extract readable plain text (paragraphs preserved, quotes/signatures
+    stripped) from a message, preferring text/plain then text/html."""
     part = msg
     if msg.is_multipart():
         part = None
@@ -77,15 +147,16 @@ def extract_text(msg):
     except Exception:
         return ""
     if part.get_content_type() == "text/html":
-        text = re.sub(r"<(style|script).*?</\1>", " ", text, flags=re.S | re.I)
-        text = re.sub(r"<br\s*/?>|</p>|</div>|</tr>|</li>|</h[1-6]>", "\n", text, flags=re.I)
-        text = re.sub(r"<[^>]+>", " ", text)
-    text = html_lib.unescape(text)
+        text = html_to_text(text)
+    else:
+        text = html_lib.unescape(text)
     text = text.replace("‌", "").replace("͏", "")  # invisible padding chars
+    text = text.replace("\xa0", " ")  # normalize non-breaking spaces (&nbsp;)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r" ?\n ?", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    text = text.strip()
+    return strip_reply_chrome(text)
 
 
 def heuristic_bucket(item, headers):

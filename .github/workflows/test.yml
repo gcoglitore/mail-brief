@@ -1,0 +1,23 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+    paths: ['pipeline/**', 'tests/**', '.github/workflows/test.yml']
+  pull_request:
+    paths: ['pipeline/**', 'tests/**']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile check
+        run: python -m py_compile pipeline/refresh_mail.py
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
