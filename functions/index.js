@@ -21,15 +21,34 @@ let lastDispatch = 0; // in-memory fallback cooldown for update-now requests
 const DB_URL = 'https://mail-brief-gio-default-rtdb.firebaseio.com';
 const SEND_LIMIT_PER_HOUR = 20;
 let _tok = { value: '', exp: 0 };
+let _sa = null;
+try { if (process.env.FIREBASE_SERVICE_ACCOUNT) _sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT); } catch (_) {}
 
+function _b64url(buf) {
+  return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// Mint a Google OAuth token from the service-account key (same identity the
+// pipeline uses to write RTDB) — deterministic, independent of runtime SA scopes.
 async function dbToken() {
+  if (!_sa || !_sa.private_key) throw new Error('no service account');
   const now = Math.floor(Date.now() / 1000);
   if (_tok.value && _tok.exp - 60 > now) return _tok.value;
-  const r = await fetch(
-    'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
-    { headers: { 'Metadata-Flavor': 'Google' } });
-  if (!r.ok) throw new Error('metadata token ' + r.status);
+  const header = _b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const claim = _b64url(JSON.stringify({
+    iss: _sa.client_email,
+    scope: 'https://www.googleapis.com/auth/firebase.database https://www.googleapis.com/auth/userinfo.email',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now, exp: now + 3600,
+  }));
+  const sig = _b64url(crypto.sign('RSA-SHA256', Buffer.from(header + '.' + claim), _sa.private_key));
+  const jwt = header + '.' + claim + '.' + sig;
+  const r = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=' + encodeURIComponent(jwt),
+  });
   const d = await r.json();
+  if (!d.access_token) throw new Error('token exchange: ' + JSON.stringify(d).slice(0, 160));
   _tok = { value: d.access_token, exp: now + (d.expires_in || 3600) };
   return _tok.value;
 }
