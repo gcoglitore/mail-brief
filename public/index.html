@@ -46,7 +46,8 @@
     font-size: 13px; background: var(--panel2); border: 1px solid var(--line); color: var(--gold);
   }
   /* Command-center daily brief */
-  #briefStrip { display: none; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  #briefStrip { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  #briefStrip.hidden { display: none; }
   .statCell { flex: 1 1 0; min-width: 74px; padding: 11px 12px; border-radius: 12px;
     background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--faint); }
   .statCell .statN { font-size: 22px; font-weight: 800; line-height: 1.1; color: var(--text); }
@@ -332,6 +333,43 @@
     color: var(--faint); font-size: 15px; line-height: 1.6;
   }
   #deskPane .dpIcon { font-size: 34px; display: block; margin-bottom: 12px; opacity: .8; }
+  /* Empty-pane productive content (#10) */
+  #deskPane .dpInner { max-width: 340px; width: 100%; text-align: left; }
+  #deskPane .dpCheck { font-size: 46px; color: var(--green); text-align: center; line-height: 1; }
+  #deskPane .dpClear { font-size: 22px; font-weight: 800; color: var(--text); text-align: center; margin-top: 8px; }
+  #deskPane .dpHi { font-size: 20px; font-weight: 800; color: var(--text); }
+  #deskPane .dpOverview { font-size: 14px; color: var(--gold); margin-top: 6px; }
+  #deskPane .dpSub { font-size: 13px; color: var(--faint); margin-top: 8px; text-align: center; }
+  #deskPane .dpHi + .dpOverview + .dpSub { text-align: left; }
+  #deskPane .dpBlock { margin-top: 26px; }
+  #deskPane .dpBlockTitle { font-size: 10.5px; letter-spacing: 1.5px; color: var(--dim); font-weight: 800; margin-bottom: 9px; }
+  #deskPane .dpDone { font-size: 13px; color: var(--faint); padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #deskPane .dpSh { display: flex; align-items: center; gap: 11px; padding: 4px 0; }
+  #deskPane .dpKey { min-width: 30px; text-align: center; font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; color: var(--dim); }
+  #deskPane .dpDesc { font-size: 13px; color: var(--dim); }
+  /* SVG row icons */
+  .rowMore svg, .pinMark svg { display: block; }
+  .pinMark { display: inline-flex; align-items: center; color: var(--gold); margin-right: 2px; }
+  #searchToggle { display: none; background: none; border: 0; color: var(--dim); cursor: pointer; padding: 5px; }
+  #searchToggle:hover { color: var(--gold); }
+  #searchToggle svg { display: block; }
+  .briefLine { display: none; }
+  /* Reveal row actions on hover for pointer devices; always shown on touch (#5) */
+  @media (hover: hover) and (min-width: 700px) {
+    .cardFoot { opacity: 0; transition: opacity .12s ease; }
+    .card:hover .cardFoot, .card:focus-within .cardFoot { opacity: 1; }
+  }
+  /* Mobile top slim-down (#2): one-line summary + collapsible search */
+  @media (max-width: 620px) {
+    #briefStrip { display: block; }
+    #briefStrip.hidden { display: none; }
+    #briefStrip .statCell { display: none; }
+    .briefLine { display: block; font-size: 12.5px; color: var(--dim); line-height: 1.5; }
+    #searchToggle { display: inline-flex; }
+    #searchBox { display: none; }
+    #app.search-open #searchBox { display: block; }
+  }
   /* ---- Desktop two-pane layout (wide screens only; phone view untouched) ---- */
   /* Two-pane only once signed in — the login stays centered full-viewport. */
   @media (min-width: 980px) {
@@ -351,6 +389,7 @@
     <h1>MAIL<span>BRIEF</span></h1>
     <div id="hdrRight">
       <span id="updated"></span>
+      <button id="searchToggle" title="Search" aria-label="Search"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg></button>
       <button id="updateBtn" title="Update now">↻</button>
     </div>
   </header>
@@ -475,6 +514,14 @@ function el(tag, className, text) {
   return node;
 }
 
+// Consistent SVG icon set (replaces stray emoji in the polished dark/gold UI).
+const IC_MORE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
+const IC_PIN = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l-1 5 3 3v2H7v-2l3-3-1-5z"/></svg>';
+// Build an SVG node from a trusted static markup string (no innerHTML).
+function svgEl(markup) {
+  return document.importNode(new DOMParser().parseFromString(markup, "image/svg+xml").documentElement, true);
+}
+
 function ago(ts) {
   const s = Math.max(1, Math.floor(Date.now() / 1000 - ts));
   if (s < 3600) return Math.floor(s / 60) + "m";
@@ -503,7 +550,7 @@ function card(i, cls) {
   // Meta line — sender · source · time (quiet)
   const meta = el("div", "cMeta");
   if (i.unread) meta.appendChild(el("span", "unread"));
-  if (isPinned(id)) meta.appendChild(el("span", "pinMark", "📌"));
+  if (isPinned(id)) { const p = el("span", "pinMark"); p.appendChild(svgEl(IC_PIN)); meta.appendChild(p); }
   meta.appendChild(el("span", "cWho", i.from_name || i.from_email || "?"));
   meta.appendChild(el("span", "cSep", "·"));
   meta.appendChild(el("span", "cSrc", i.account));
@@ -584,6 +631,7 @@ function openReader(i) {
 function closeReader() {
   $("reader").style.display = "none";
   readerItem = null;
+  renderDeskPane();
 }
 
 // ===== Undo / sync-state toast =====
@@ -622,6 +670,7 @@ function archiveItem(i) {
   const idx = BRIEF.items.indexOf(i);
   if (idx < 0) return;
   BRIEF.items.splice(idx, 1);
+  RECENT_DONE.unshift(i.action_summary || i.subject || i.from_name || "email");
   cacheBrief();
   closeReader();
   render();
@@ -629,6 +678,7 @@ function archiveItem(i) {
     state: "ok", ms: 6000,
     undo: () => {                       // nothing sent yet — just restore it
       BRIEF.items.splice(Math.min(idx, BRIEF.items.length), 0, i);
+      RECENT_DONE.shift();
       cacheBrief(); render();
     },
     onExpire: () => commitArchive(i, idx),
@@ -899,8 +949,8 @@ function updateAppBadge() {
 function renderBriefStrip(attn) {
   const strip = $("briefStrip");
   strip.replaceChildren();
-  if (!attn.length) { strip.style.display = "none"; return; }
-  strip.style.display = "flex";
+  if (!attn.length) { strip.classList.add("hidden"); return; }
+  strip.classList.remove("hidden");
   const repliable = attn.filter(i => i.reply_to).length;
   const unread = attn.filter(i => i.unread).length;
   const oldest = attn.reduce((m, i) => Math.min(m, i.ts || Infinity), Infinity);
@@ -917,12 +967,64 @@ function renderBriefStrip(attn) {
   if (docs) cells.push({ n: docs, label: docs === 1 ? "doc to action" : "docs to action", tone: "gold" });
   if (!meetings && !docs) cells.push({ n: unread, label: "unread", tone: "blue" });
   if (oldest !== Infinity) cells.push({ n: ago(oldest), label: "oldest waiting", tone: overdue ? "red" : "gray" });
+  // One-line summary (shown on mobile instead of the stat cells).
+  strip.appendChild(el("div", "briefLine", cells.map(c => c.n + " " + c.label).join("  ·  ")));
   cells.forEach(c => {
     const cell = el("div", "statCell tone-" + c.tone);
     cell.appendChild(el("div", "statN", String(c.n)));
     cell.appendChild(el("div", "statL", c.label));
     strip.appendChild(cell);
   });
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+}
+let RECENT_DONE = [];  // subjects/titles archived this session, newest first
+
+// Productive content for the desktop right pane when nothing is open (#10).
+function renderDeskPane() {
+  const dp = $("deskPane");
+  if (!dp) return;
+  dp.replaceChildren();
+  const inner = el("div", "dpInner");
+  const attn = ((BRIEF && BRIEF.items) || []).filter(i => i.bucket === "attention" && !isSnoozed(entryId(i)));
+  const unreadMsgs = ((MSGS && MSGS.chats) || []).filter(c => c.unread > 0 && !isSnoozed(entryId(c))).length;
+  const totalActive = attn.length + unreadMsgs;
+
+  if (totalActive === 0) {
+    inner.appendChild(el("div", "dpCheck", "✓"));
+    inner.appendChild(el("div", "dpClear", "You're clear"));
+    inner.appendChild(el("div", "dpSub", "Nothing needs your attention right now."));
+  } else {
+    const repliable = attn.filter(i => i.reply_to).length;
+    const oldest = attn.reduce((m, i) => Math.min(m, i.ts || Infinity), Infinity);
+    inner.appendChild(el("div", "dpHi", greeting()));
+    const parts = [totalActive + " item" + (totalActive === 1 ? "" : "s") + " need attention"];
+    if (repliable) parts.push(repliable + " to reply");
+    if (oldest !== Infinity) parts.push("oldest " + ago(oldest));
+    inner.appendChild(el("div", "dpOverview", parts.join("  ·  ")));
+    inner.appendChild(el("div", "dpSub", "Select an item on the left to read and act on it."));
+  }
+
+  if (RECENT_DONE.length) {
+    const rd = el("div", "dpBlock");
+    rd.appendChild(el("div", "dpBlockTitle", "RECENTLY DONE"));
+    RECENT_DONE.slice(0, 4).forEach(t => rd.appendChild(el("div", "dpDone", "✓ " + t)));
+    inner.appendChild(rd);
+  }
+
+  const sc = el("div", "dpBlock");
+  sc.appendChild(el("div", "dpBlockTitle", "SHORTCUTS"));
+  [["/", "Search"], ["1–4", "Switch tabs"], ["R", "Refresh"], ["Esc", "Close"]].forEach(([k, d]) => {
+    const r = el("div", "dpSh");
+    r.appendChild(el("kbd", "dpKey", k));
+    r.appendChild(el("span", "dpDesc", d));
+    sc.appendChild(r);
+  });
+  inner.appendChild(sc);
+  dp.appendChild(inner);
 }
 
 // ===== Pin / Snooze (synced to the DB so they carry across devices) =====
@@ -1014,13 +1116,14 @@ function openRowMenu(e, anchorBtn) {
 }
 document.addEventListener("click", e => {
   const m = $("snoozeMenu");
-  if (m && m.style.display === "block" && !m.contains(e.target) && !e.target.classList.contains("rowMore"))
+  if (m && m.style.display === "block" && !m.contains(e.target) && !(e.target.closest && e.target.closest(".rowMore")))
     m.style.display = "none";
 });
 // A ⋯ overflow button for a row (e = mail item or chat).
 function moreBtn(e) {
   if (!entryId(e)) return null;
-  const b = el("button", "rowMore", "⋯");
+  const b = el("button", "rowMore");
+  b.appendChild(svgEl(IC_MORE));
   b.title = "More"; b.setAttribute("aria-label", "More actions");
   b.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation(); openRowMenu(e, b); });
   return b;
@@ -1155,7 +1258,7 @@ function priorityMsgRow(c) {
   row.appendChild(el("span", "net " + netClass(c.network), netLabel(c.network)));
   const mid = el("div", "chatMid");
   const title = el("div", "chatTitle", c.title || "(no title)");
-  if (isPinned(id)) title.textContent = "📌 " + title.textContent;
+  if (isPinned(id)) { const p = el("span", "pinMark"); p.appendChild(svgEl(IC_PIN)); title.prepend(p); }
   mid.appendChild(title);
   mid.appendChild(el("div", "chatPrev", c.preview || ""));
   row.appendChild(mid);
@@ -1180,6 +1283,7 @@ function render() {
 
   if (VIEW === "priority") renderPriority();
   else renderBriefStrip(SEARCH ? [] : attn);
+  renderDeskPane();
 
   const chips = $("chips");
   chips.replaceChildren();
@@ -1343,6 +1447,11 @@ async function updateNow() {
   }, 12000);
 }
 $("updateBtn").addEventListener("click", updateNow);
+$("searchToggle").addEventListener("click", () => {
+  const open = $("app").classList.toggle("search-open");
+  if (open) $("searchBox").focus();
+  else { $("searchBox").value = ""; SEARCH = ""; reRenderActive(); }
+});
 
 $("readerBack").addEventListener("click", closeReader);
 
@@ -1488,6 +1597,7 @@ async function loadMessages() {
   renderMessages();
   updateMsgBadges();
   if (VIEW === "priority") renderPriority();  // messages feed the unified rail
+  renderDeskPane();
 }
 
 function setBadge(id, n) {
@@ -1602,7 +1712,7 @@ function openThread(c) {
   setTimeout(() => { body.scrollTop = body.scrollHeight; }, 40);
 }
 
-function closeThread() { $("thread").classList.remove("open"); threadChat = null; }
+function closeThread() { $("thread").classList.remove("open"); threadChat = null; renderDeskPane(); }
 
 async function sendMessage() {
   if (!threadChat) return;
@@ -1641,7 +1751,7 @@ function switchView(which) {
   $("tabMail").classList.toggle("on", isMail);
   $("tabMsg").classList.toggle("on", which === "msg");
   $("tabDM").classList.toggle("on", which === "dm");
-  if (isMsg) $("briefStrip").style.display = "none"; // brief strip only on priority/mail
+  if (isMsg) $("briefStrip").classList.add("hidden"); // brief strip only on priority/mail
   if (isPrio) { renderPriority(); loadMessages(); }  // load msgs so the merge is complete
   else if (isMail) { if (BRIEF) render(); }
   else loadMessages();
@@ -1657,6 +1767,25 @@ $("searchBox").addEventListener("input", e => {
   else if (VIEW === "mail") { if (BRIEF) render(); }
   else renderMessages();
 });
+
+// Global keyboard shortcuts (documented in the empty desktop pane).
+document.addEventListener("keydown", e => {
+  if (!document.body.classList.contains("signed-in")) return;
+  const typing = e.target && e.target.matches && e.target.matches("input, textarea");
+  if (e.key === "Escape") {
+    if (typing) { e.target.blur(); return; }
+    closeCompose(); closeReader(); closeThread(); $("app").classList.remove("search-open");
+    return;
+  }
+  if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "/") { e.preventDefault(); $("app").classList.add("search-open"); $("searchBox").focus(); }
+  else if (e.key === "1") switchView("priority");
+  else if (e.key === "2") switchView("mail");
+  else if (e.key === "3") switchView("msg");
+  else if (e.key === "4") switchView("dm");
+  else if (e.key === "r" || e.key === "R") { const b = $("updateBtn"); if (b) b.click(); }
+});
+
 $("threadBack").addEventListener("click", closeThread);
 $("threadSend").addEventListener("click", sendMessage);
 $("threadInput").addEventListener("keydown", e => { if (e.key === "Enter") sendMessage(); });
