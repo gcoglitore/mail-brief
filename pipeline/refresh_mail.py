@@ -258,6 +258,65 @@ def claude_refine(items, anthropic_key, openrouter_key):
         print(f"AI scoring skipped: {exc}")
 
 
+def thread_key(msg, msgid):
+    """A stable key grouping a message with its conversation: the thread root
+    (first References id), else In-Reply-To, else the message's own id."""
+    refs = (msg.get("References") or "").split()
+    if refs:
+        return refs[0].strip("<> ")
+    irt = (msg.get("In-Reply-To") or "").strip("<> ")
+    if irt:
+        return irt
+    return msgid or ""
+
+
+def extract_attachments(msg):
+    """List of {name, size} for any named parts (attachments / inline files)."""
+    out = []
+    if not msg.is_multipart():
+        return out
+    for p in msg.walk():
+        name = p.get_filename()
+        if not name:
+            continue
+        try:
+            size = len(p.get_payload(decode=True) or b"")
+        except Exception:
+            size = 0
+        out.append({"name": decode_header(name)[:80], "size": size})
+        if len(out) >= 6:
+            break
+    return out
+
+
+def group_threads(msgs):
+    """Collapse received messages into one item per conversation. The latest
+    message represents the thread; earlier ones become compact context, and the
+    thread counts as unread if any message in it is unread."""
+    threads, order = {}, []
+    for m in msgs:
+        k = m.get("thread_key") or m.get("msgid") or repr(m)
+        if k not in threads:
+            threads[k] = []
+            order.append(k)
+        threads[k].append(m)
+    out = []
+    for k in order:
+        group = sorted(threads[k], key=lambda x: x.get("ts", 0))
+        rep = group[-1]
+        rep.pop("thread_key", None)
+        rep["unread"] = any(m.get("unread") for m in group)
+        if len(group) > 1:
+            rep["thread"] = [
+                {"from": m.get("from_name", ""), "ts": m.get("ts", 0),
+                 "snippet": (m.get("snippet") or "")[:140]}
+                for m in group[:-1]
+            ][-3:]
+            rep["thread_count"] = len(group)
+        out.append(rep)
+    return out
+
+
 def fetch_account(label, addr, host, password):
     items = []
     box = imaplib.IMAP4_SSL(host)
@@ -305,16 +364,21 @@ def fetch_account(label, addr, host, password):
                 "msgid": msgid,
                 "reply_to": reply_to,
                 "references": refs,
+                "thread_key": thread_key(msg, msgid),
             }
+            atts = extract_attachments(msg)
+            if atts:
+                item["attachments"] = atts
             item["bucket"] = heuristic_bucket(item, headers)
             items.append(item)
         except Exception as exc:
             skipped += 1
             print(f"  {label}: skipped a malformed message ({str(exc)[:100]})")
-    if skipped:
-        print(f"  {label}: {skipped} message(s) skipped, {len(items)} kept")
     box.logout()
-    return items
+    threads = group_threads(items)
+    if skipped or len(threads) != len(items):
+        print(f"  {label}: {len(items)} message(s) → {len(threads)} thread(s)" + (f", {skipped} skipped" if skipped else ""))
+    return threads
 
 
 def item_id(i):

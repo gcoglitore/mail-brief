@@ -107,5 +107,60 @@ class ItemId(unittest.TestCase):
             rm.item_id({"from_email": "a@b.com", "subject": "Hi", "ts": 5}), "a@b.com|Hi|5")
 
 
+class ThreadKey(unittest.TestCase):
+    def _m(self, refs=None, irt=None):
+        m = email.message.EmailMessage()
+        if refs:
+            m["References"] = refs
+        if irt:
+            m["In-Reply-To"] = irt
+        return m
+
+    def test_uses_references_root(self):
+        self.assertEqual(rm.thread_key(self._m(refs="<root@x> <b@x>"), "self@x"), "root@x")
+
+    def test_falls_back_to_in_reply_to(self):
+        self.assertEqual(rm.thread_key(self._m(irt="<parent@x>"), "self@x"), "parent@x")
+
+    def test_singleton_uses_own_id(self):
+        self.assertEqual(rm.thread_key(self._m(), "self@x"), "self@x")
+
+
+class GroupThreads(unittest.TestCase):
+    def test_collapses_to_latest_with_context(self):
+        msgs = [
+            {"msgid": "a", "thread_key": "root", "ts": 10, "unread": False, "from_name": "Bob", "snippet": "first"},
+            {"msgid": "b", "thread_key": "root", "ts": 20, "unread": True, "from_name": "Bob", "snippet": "second"},
+            {"msgid": "c", "thread_key": "other", "ts": 15, "unread": False, "from_name": "Ann", "snippet": "solo"},
+        ]
+        out = rm.group_threads(msgs)
+        self.assertEqual(len(out), 2)
+        root = next(x for x in out if x["msgid"] == "b")
+        self.assertEqual(root["thread_count"], 2)
+        self.assertEqual(len(root["thread"]), 1)
+        self.assertEqual(root["thread"][0]["snippet"], "first")
+        self.assertTrue(root["unread"])  # thread is unread if any message is
+
+    def test_singleton_has_no_thread_field(self):
+        out = rm.group_threads([{"msgid": "x", "thread_key": "x", "ts": 1, "unread": False}])
+        self.assertNotIn("thread", out[0])
+
+
+class Attachments(unittest.TestCase):
+    def test_lists_named_parts_with_size(self):
+        m = email.message.EmailMessage()
+        m.set_content("body")
+        m.add_attachment(b"PDFDATA", maintype="application", subtype="pdf", filename="contract.pdf")
+        atts = rm.extract_attachments(m)
+        self.assertEqual(len(atts), 1)
+        self.assertEqual(atts[0]["name"], "contract.pdf")
+        self.assertEqual(atts[0]["size"], 7)
+
+    def test_plain_message_has_none(self):
+        m = email.message.EmailMessage()
+        m.set_content("just text")
+        self.assertEqual(rm.extract_attachments(m), [])
+
+
 if __name__ == "__main__":
     unittest.main()
