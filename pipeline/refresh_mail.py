@@ -317,7 +317,7 @@ def group_threads(msgs):
     return out
 
 
-def fetch_account(label, addr, host, password):
+def fetch_account(label, addr, host, password, group=True):
     items = []
     box = imaplib.IMAP4_SSL(host)
     box.login(addr, password.replace(" ", ""))
@@ -375,6 +375,12 @@ def fetch_account(label, addr, host, password):
             skipped += 1
             print(f"  {label}: skipped a malformed message ({str(exc)[:100]})")
     box.logout()
+    if not group:
+        for it in items:
+            it.pop("thread_key", None)
+        if skipped:
+            print(f"  {label}: {skipped} message(s) skipped, {len(items)} kept (grouping off)")
+        return items
     threads = group_threads(items)
     if skipped or len(threads) != len(items):
         print(f"  {label}: {len(items)} message(s) → {len(threads)} thread(s)" + (f", {skipped} skipped" if skipped else ""))
@@ -475,10 +481,24 @@ def main():
         print("No MAIL_ACCOUNT_N secrets configured — nothing to do.")
         sys.exit(0)
 
+    key = os.environ["MAILBRIEF_ACCESS_KEY"].strip()
+    token = db_token(os.environ["FIREBASE_SERVICE_ACCOUNT"])
+
+    # Thread grouping is a user setting (Preferences → Group email threads),
+    # stored in the DB so it applies on the next refresh. Default on.
+    group_on = True
+    try:
+        s = db_get(f"/briefs/{key}/settings.json", token)
+        if isinstance(s, dict) and s.get("group_threads") is False:
+            group_on = False
+    except Exception:
+        pass
+    print(f"Thread grouping: {'on' if group_on else 'off'}")
+
     all_items, statuses = [], []
     for label, addr, host, password in accounts:
         try:
-            got = fetch_account(label.strip(), addr.strip(), host.strip(), password)
+            got = fetch_account(label.strip(), addr.strip(), host.strip(), password, group=group_on)
             all_items.extend(got)
             statuses.append({"account": label, "ok": True, "count": len(got)})
             print(f"{label}: {len(got)} messages")
@@ -499,9 +519,6 @@ def main():
     for i in all_items:
         if i["bucket"] == "junk":
             i.pop("body", None)
-
-    key = os.environ["MAILBRIEF_ACCESS_KEY"].strip()
-    token = db_token(os.environ["FIREBASE_SERVICE_ACCOUNT"])
 
     # Fetch the previously published brief once — reused for both the failed-account
     # merge below and the attention diff for push notifications.

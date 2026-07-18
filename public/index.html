@@ -580,7 +580,7 @@ let AGING_DAYS = 2;          // an item older than this reads as overdue
 function isOverdue(ts) { return !!ts && (Date.now() / 1000 - ts) > AGING_DAYS * 86400; }
 
 // ===== Preferences (per-device, in localStorage) =====
-const PREF_DEFAULTS = { sort: "grouped", aging: 2, density: "comfortable", inclTexts: true, inclDMs: true, showFyi: true };
+const PREF_DEFAULTS = { sort: "grouped", aging: 2, density: "comfortable", inclTexts: true, inclDMs: true, showFyi: true, groupThreads: true };
 let PREFS = Object.assign({}, PREF_DEFAULTS);
 function loadPrefs() {
   try { PREFS = Object.assign({}, PREF_DEFAULTS, JSON.parse(localStorage.getItem("mailbrief_prefs") || "{}")); }
@@ -595,6 +595,25 @@ function savePrefs() {
 function applyPrefs() {
   AGING_DAYS = Number(PREFS.aging) || 2;
   document.body.classList.toggle("compact", PREFS.density === "compact");
+}
+
+// Thread grouping is enforced server-side (the pipeline reads it), so this one
+// setting lives in the DB (account-wide) rather than local device prefs.
+async function loadServerSettings() {
+  const key = localStorage.getItem("mailbrief_key");
+  if (!key) return;
+  try {
+    const r = await fetch(DB + "/briefs/" + encodeURIComponent(key) + "/settings.json");
+    const s = await r.json();
+    if (s && typeof s.group_threads === "boolean") PREFS.groupThreads = s.group_threads;
+  } catch (_) {}
+}
+function writeGroupThreads(v) {
+  const key = localStorage.getItem("mailbrief_key");
+  if (key) fetch(DB + "/briefs/" + encodeURIComponent(key) + "/settings/group_threads.json", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(v),
+  }).catch(() => {});
+  showToast("Thread grouping " + (v ? "on" : "off") + " — applies on next refresh", { state: "ok", ms: 3500 });
 }
 
 function openSettings() {
@@ -635,6 +654,8 @@ function openSettings() {
   toggle("Include DMs (Signal / Slack…)", PREFS.inclDMs, v => { PREFS.inclDMs = v; });
   sheet.appendChild(el("div", "setGroup", "ALL MAIL"));
   toggle("Show FYI section", PREFS.showFyi, v => { PREFS.showFyi = v; });
+  sheet.appendChild(el("div", "setGroup", "EMAIL"));
+  toggle("Group into conversations", PREFS.groupThreads, v => { PREFS.groupThreads = v; writeGroupThreads(v); });
   const done = el("button", "setClose", "Done");
   done.addEventListener("click", closeSettings);
   sheet.appendChild(done);
@@ -1596,6 +1617,7 @@ async function load(key, fromButton) {
     $("app").style.display = "block";
     document.body.classList.add("signed-in");
     loadPrefs();         // device preferences (sort/aging/density/channels/fyi)
+    loadServerSettings();// account-wide settings (thread grouping)
     await loadFlags();   // pins/snoozes before first paint
     render();
     updateNetBar(false);
