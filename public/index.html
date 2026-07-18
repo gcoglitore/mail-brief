@@ -43,6 +43,35 @@
   body.signed-in #updateBtn { display: inline-block; }
   #updateBtn.spin { animation: rot 1s linear infinite; opacity: .7; }
   @keyframes rot { to { transform: rotate(360deg); } }
+  #prefsBtn { display: none; background: none; border: 0; color: var(--dim); cursor: pointer; padding: 4px; }
+  body.signed-in #prefsBtn { display: inline-flex; }
+  #prefsBtn:hover { color: var(--gold); }
+  #prefsBtn svg { display: block; }
+  /* Preferences modal */
+  #settingsWrap { display: none; position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.55);
+    align-items: flex-end; justify-content: center; padding: 0; }
+  #settingsSheet { width: 100%; max-width: 480px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 16px 16px 0 0; padding: 20px 20px calc(24px + env(safe-area-inset-bottom));
+    max-height: 88vh; overflow-y: auto; }
+  #settingsSheet .setTitle { font-size: 16px; font-weight: 800; margin-bottom: 14px; }
+  #settingsSheet .setGroup { font-size: 10.5px; letter-spacing: 1.5px; color: var(--dim);
+    font-weight: 800; margin: 18px 0 4px; }
+  .setRow { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .setRow .setLabel { flex: 1; font-size: 14px; }
+  .setSwitch { width: 46px; height: 26px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--panel2); position: relative; cursor: pointer; flex: none; padding: 0; }
+  .setSwitch .knob { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--faint); transition: left .15s, background .15s; }
+  .setSwitch.on { background: rgba(212,168,67,.25); border-color: var(--gold); }
+  .setSwitch.on .knob { left: 22px; background: var(--gold); }
+  .setClose { display: block; width: 100%; margin-top: 22px; padding: 12px; border: 0; border-radius: 10px;
+    background: var(--gold); color: #14100a; font-size: 15px; font-weight: 700; cursor: pointer; }
+  /* Compact row density */
+  body.compact .card { padding: 8px 12px; margin-bottom: 6px; }
+  body.compact .cPrimary { font-size: 14px; margin-top: 3px; }
+  body.compact .cSecondary { margin-top: 1px; }
+  body.compact .cardFoot { margin-top: 7px; }
+  body.compact .chat { padding: 8px 11px; margin-bottom: 6px; }
   /* Visible keyboard focus (a11y) */
   button:focus-visible, input:focus-visible, [tabindex]:focus-visible, [role="tab"]:focus-visible,
   [role="menuitem"]:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
@@ -384,6 +413,16 @@
     body.signed-in #searchToggle { display: inline-flex; }
     #searchBox { display: none; }
     #app.search-open #searchBox { display: block; }
+    /* #3 Bottom navigation: move the view tabs to a fixed bottom bar */
+    #viewTabs {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; margin: 0; gap: 0;
+      background: var(--panel2); border-top: 1px solid var(--line);
+      padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+    }
+    .vtab { border: 0; background: none; border-radius: 10px; font-size: 11px; font-weight: 700;
+      color: var(--dim); padding: 8px 0; }
+    .vtab.on { background: none; color: var(--gold); }
+    .wrap { padding-bottom: 76px; }  /* clear the fixed bar */
   }
   /* ---- Desktop two-pane layout (wide screens only; phone view untouched) ---- */
   /* Two-pane only once signed in — the login stays centered full-viewport. */
@@ -405,6 +444,7 @@
     <div id="hdrRight">
       <span id="updated"></span>
       <button id="searchToggle" title="Search" aria-label="Search"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg></button>
+      <button id="prefsBtn" title="Preferences" aria-label="Preferences"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
       <button id="updateBtn" title="Update now">↻</button>
     </div>
   </header>
@@ -483,6 +523,7 @@
 
 <div id="toast"></div>
 <div id="snoozeMenu"></div>
+<div id="settingsWrap"><div id="settingsSheet" role="dialog" aria-label="Preferences"></div></div>
 
 <div id="composeWrap">
   <div id="composeSheet">
@@ -515,6 +556,69 @@ let PRIO_SORT = "grouped";   // grouped (by intent) | newest (flat chronological
 let PRIO_FILTER = "active";  // active | snoozed
 let AGING_DAYS = 2;          // an item older than this reads as overdue
 function isOverdue(ts) { return !!ts && (Date.now() / 1000 - ts) > AGING_DAYS * 86400; }
+
+// ===== Preferences (per-device, in localStorage) =====
+const PREF_DEFAULTS = { sort: "grouped", aging: 2, density: "comfortable", inclTexts: true, inclDMs: true, showFyi: true };
+let PREFS = Object.assign({}, PREF_DEFAULTS);
+function loadPrefs() {
+  try { PREFS = Object.assign({}, PREF_DEFAULTS, JSON.parse(localStorage.getItem("mailbrief_prefs") || "{}")); }
+  catch (_) { PREFS = Object.assign({}, PREF_DEFAULTS); }
+  PRIO_SORT = PREFS.sort;
+  applyPrefs();
+}
+function savePrefs() {
+  try { localStorage.setItem("mailbrief_prefs", JSON.stringify(PREFS)); } catch (_) {}
+  applyPrefs();
+}
+function applyPrefs() {
+  AGING_DAYS = Number(PREFS.aging) || 2;
+  document.body.classList.toggle("compact", PREFS.density === "compact");
+}
+
+function openSettings() {
+  const sheet = $("settingsSheet");
+  sheet.replaceChildren();
+  sheet.appendChild(el("h3", "setTitle", "Preferences"));
+  const change = () => { savePrefs(); openSettings(); reRenderActive(); renderDeskPane(); };
+  const seg = (label, opts, cur, set) => {
+    const row = el("div", "setRow");
+    row.appendChild(el("div", "setLabel", label));
+    const s = el("div", "segToggle");
+    opts.forEach(([val, lbl]) => {
+      const b = el("button", "segBtn" + (cur === val ? " on" : ""), lbl);
+      b.addEventListener("click", () => { set(val); change(); });
+      s.appendChild(b);
+    });
+    row.appendChild(s);
+    sheet.appendChild(row);
+  };
+  const toggle = (label, cur, set) => {
+    const row = el("div", "setRow");
+    row.appendChild(el("div", "setLabel", label));
+    const b = el("button", "setSwitch" + (cur ? " on" : ""));
+    b.setAttribute("role", "switch"); b.setAttribute("aria-checked", String(cur));
+    b.appendChild(el("span", "knob"));
+    b.addEventListener("click", () => { set(!cur); change(); });
+    row.appendChild(b);
+    sheet.appendChild(row);
+  };
+  seg("Default Priority sort", [["grouped", "Grouped"], ["newest", "Newest"]], PREFS.sort,
+    v => { PREFS.sort = v; PRIO_SORT = v; });
+  seg("Row density", [["comfortable", "Comfortable"], ["compact", "Compact"]], PREFS.density,
+    v => { PREFS.density = v; });
+  seg("Overdue after", [["1", "1d"], ["2", "2d"], ["3", "3d"], ["5", "5d"], ["7", "1wk"]], String(PREFS.aging),
+    v => { PREFS.aging = Number(v); });
+  sheet.appendChild(el("div", "setGroup", "IN PRIORITY"));
+  toggle("Include Texts (iMessage / SMS)", PREFS.inclTexts, v => { PREFS.inclTexts = v; });
+  toggle("Include DMs (Signal / Slack…)", PREFS.inclDMs, v => { PREFS.inclDMs = v; });
+  sheet.appendChild(el("div", "setGroup", "ALL MAIL"));
+  toggle("Show FYI section", PREFS.showFyi, v => { PREFS.showFyi = v; });
+  const done = el("button", "setClose", "Done");
+  done.addEventListener("click", closeSettings);
+  sheet.appendChild(done);
+  $("settingsWrap").style.display = "flex";
+}
+function closeSettings() { $("settingsWrap").style.display = "none"; }
 
 // Case-insensitive: does the (already-lowercased) query appear in any field?
 function matchText(q) {
@@ -1250,7 +1354,11 @@ function renderPriority() {
   const base = [];
   attnAll.forEach(i => base.push({ kind: "mail", ts: i.ts || 0, item: i, id: entryId(i) }));
   ((MSGS && MSGS.chats) || []).forEach(c => {
-    if (c.unread > 0) base.push({ kind: "msg", ts: c.ts || 0, chat: c, id: entryId(c) });
+    if (c.unread <= 0) return;
+    const cat = msgCategory(c.network);          // "msg" (Texts) or "dm"
+    if (cat === "msg" && !PREFS.inclTexts) return;
+    if (cat === "dm" && !PREFS.inclDMs) return;
+    base.push({ kind: "msg", ts: c.ts || 0, chat: c, id: entryId(c) });
   });
   const active = base.filter(e => !isSnoozed(e.id));
   const snoozed = base.filter(e => isSnoozed(e.id));
@@ -1263,7 +1371,7 @@ function renderPriority() {
     const seg = el("div", "segToggle");
     [["grouped", "Grouped"], ["newest", "Newest"]].forEach(([m, lbl]) => {
       const b = el("button", "segBtn" + (PRIO_SORT === m ? " on" : ""), lbl);
-      b.addEventListener("click", () => { PRIO_SORT = m; renderPriority(); });
+      b.addEventListener("click", () => { PRIO_SORT = m; PREFS.sort = m; savePrefs(); renderPriority(); });
       seg.appendChild(b);
     });
     tools.appendChild(seg);
@@ -1355,7 +1463,7 @@ function render() {
     section(content, "RESULTS", "var(--gold)", matches, "", "No matching email.");
   } else {
     section(content, "NEEDS ATTENTION", "var(--red)", attn, "attn", "Nothing needs your attention.", archiveAllAttention);
-    section(content, "FYI", "var(--blue)", fyi, "fyi", "Nothing here.");
+    if (PREFS.showFyi) section(content, "FYI", "var(--blue)", fyi, "fyi", "Nothing here.");
 
     const junkHead = el("div", "secHead");
     const jdot = el("span", "dot"); jdot.style.background = "var(--faint)";
@@ -1412,6 +1520,7 @@ async function load(key, fromButton) {
     $("keyScreen").style.display = "none";
     $("app").style.display = "block";
     document.body.classList.add("signed-in");
+    loadPrefs();         // device preferences (sort/aging/density/channels/fyi)
     await loadFlags();   // pins/snoozes before first paint
     render();
     updateNetBar(false);
@@ -1506,6 +1615,8 @@ $("searchToggle").addEventListener("click", () => {
   if (open) $("searchBox").focus();
   else { $("searchBox").value = ""; SEARCH = ""; reRenderActive(); }
 });
+$("prefsBtn").addEventListener("click", openSettings);
+$("settingsWrap").addEventListener("click", e => { if (e.target === $("settingsWrap")) closeSettings(); });
 
 $("readerBack").addEventListener("click", closeReader);
 
@@ -1833,7 +1944,7 @@ document.addEventListener("keydown", e => {
   const typing = e.target && e.target.matches && e.target.matches("input, textarea");
   if (e.key === "Escape") {
     if (typing) { e.target.blur(); return; }
-    closeCompose(); closeReader(); closeThread(); $("app").classList.remove("search-open");
+    closeSettings(); closeCompose(); closeReader(); closeThread(); $("app").classList.remove("search-open");
     return;
   }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
