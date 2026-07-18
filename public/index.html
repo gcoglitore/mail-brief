@@ -318,13 +318,15 @@
   <div id="app" style="display:none">
     <div id="netBar"></div>
     <div id="viewTabs">
-      <button id="tabMail" class="vtab on">Mail<span id="mailBadge" class="tabBadge"></span></button>
+      <button id="tabPriority" class="vtab on">Priority<span id="prioBadge" class="tabBadge"></span></button>
+      <button id="tabMail" class="vtab">Mail<span id="mailBadge" class="tabBadge"></span></button>
       <button id="tabMsg" class="vtab">Texts<span id="msgBadge" class="tabBadge"></span></button>
       <button id="tabDM" class="vtab">DMs<span id="dmBadge" class="tabBadge"></span></button>
     </div>
     <input id="searchBox" type="search" placeholder="Search…" autocomplete="off">
-    <div id="mailView">
-      <div id="briefStrip"></div>
+    <div id="briefStrip"></div>
+    <div id="priorityView"></div>
+    <div id="mailView" style="display:none">
       <div id="mailTools"><button id="readAllBtn">✓ Mark all read</button></div>
       <div id="chips"></div>
       <div id="content"></div>
@@ -400,6 +402,7 @@ const DB = "https://mail-brief-gio-default-rtdb.firebaseio.com";
 let BRIEF = null;
 let FILTER = "ALL";
 let SEARCH = "";
+let VIEW = "priority";  // active top-level view: priority | mail | msg | dm
 
 // Case-insensitive: does the (already-lowercased) query appear in any field?
 function matchText(q) {
@@ -865,6 +868,49 @@ function renderBriefStrip(attn) {
   });
 }
 
+// Unified priority rail: attention email + unread conversations from every
+// channel, newest first, each row showing its source. This is the home view.
+function renderPriority() {
+  const v = $("priorityView");
+  v.replaceChildren();
+  const attn = ((BRIEF && BRIEF.items) || []).filter(i => i.bucket === "attention");
+  renderBriefStrip(SEARCH ? [] : attn);
+  let entries = [];
+  attn.forEach(i => entries.push({ kind: "mail", ts: i.ts || 0, item: i }));
+  ((MSGS && MSGS.chats) || []).forEach(c => {
+    if (c.unread > 0) entries.push({ kind: "msg", ts: c.ts || 0, chat: c });
+  });
+  const total = entries.length;
+  if (SEARCH) {
+    entries = entries.filter(e => e.kind === "mail"
+      ? matchText(SEARCH, e.item.from_name, e.item.from_email, e.item.subject, e.item.snippet, e.item.action_summary)
+      : matchText(SEARCH, e.chat.title, e.chat.preview));
+  }
+  entries.sort((a, b) => b.ts - a.ts);
+  setBadge("prioBadge", total);
+  if (!entries.length) {
+    v.appendChild(el("div", "empty", SEARCH ? "No matching priority items."
+      : "You're all caught up — nothing needs your attention."));
+    return;
+  }
+  entries.forEach(e => v.appendChild(e.kind === "mail" ? card(e.item, "attn") : priorityMsgRow(e.chat)));
+}
+
+function priorityMsgRow(c) {
+  const row = el("div", "chat");
+  row.appendChild(el("span", "net " + netClass(c.network), netLabel(c.network)));
+  const mid = el("div", "chatMid");
+  mid.appendChild(el("div", "chatTitle", c.title || "(no title)"));
+  mid.appendChild(el("div", "chatPrev", c.preview || ""));
+  row.appendChild(mid);
+  const right = el("div", "chatRight");
+  right.appendChild(el("div", "chatAgo", c.ts ? ago(c.ts) : ""));
+  if (c.unread > 0) right.appendChild(el("div", "chatUnread", String(c.unread)));
+  row.appendChild(right);
+  row.addEventListener("click", () => openThread(c));
+  return row;
+}
+
 function render() {
   if (!BRIEF) return;
   updateAppBadge();
@@ -874,7 +920,8 @@ function render() {
   const fyi  = items.filter(i => i.bucket === "fyi");
   const junk = items.filter(i => i.bucket === "junk");
 
-  renderBriefStrip(SEARCH ? [] : attn);
+  if (VIEW === "priority") renderPriority();
+  else renderBriefStrip(SEARCH ? [] : attn);
 
   const chips = $("chips");
   chips.replaceChildren();
@@ -1177,6 +1224,7 @@ async function loadMessages() {
   }
   renderMessages();
   updateMsgBadges();
+  if (VIEW === "priority") renderPriority();  // messages feed the unified rail
 }
 
 function setBadge(id, n) {
@@ -1319,22 +1367,31 @@ async function sendMessage() {
 }
 
 function switchView(which) {
-  const mail = which === "mail";
-  if (!mail) MSGVIEW = which; // "msg" (texts) or "dm"
-  $("mailView").style.display = mail ? "block" : "none";
-  $("msgView").style.display = mail ? "none" : "block";
-  $("tabMail").classList.toggle("on", mail);
+  VIEW = which;
+  const isPrio = which === "priority", isMail = which === "mail";
+  const isMsg = which === "msg" || which === "dm";
+  if (isMsg) MSGVIEW = which;
+  $("priorityView").style.display = isPrio ? "block" : "none";
+  $("mailView").style.display = isMail ? "block" : "none";
+  $("msgView").style.display = isMsg ? "block" : "none";
+  $("tabPriority").classList.toggle("on", isPrio);
+  $("tabMail").classList.toggle("on", isMail);
   $("tabMsg").classList.toggle("on", which === "msg");
   $("tabDM").classList.toggle("on", which === "dm");
-  if (mail) { if (BRIEF) render(); } else loadMessages();
+  if (isMsg) $("briefStrip").style.display = "none"; // brief strip only on priority/mail
+  if (isPrio) { renderPriority(); loadMessages(); }  // load msgs so the merge is complete
+  else if (isMail) { if (BRIEF) render(); }
+  else loadMessages();
 }
 
+$("tabPriority").addEventListener("click", () => switchView("priority"));
 $("tabMail").addEventListener("click", () => switchView("mail"));
 $("tabMsg").addEventListener("click", () => switchView("msg"));
 $("tabDM").addEventListener("click", () => switchView("dm"));
 $("searchBox").addEventListener("input", e => {
   SEARCH = e.target.value.trim().toLowerCase();
-  if ($("mailView").style.display !== "none") { if (BRIEF) render(); }
+  if (VIEW === "priority") renderPriority();
+  else if (VIEW === "mail") { if (BRIEF) render(); }
   else renderMessages();
 });
 $("threadBack").addEventListener("click", closeThread);
