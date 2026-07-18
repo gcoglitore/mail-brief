@@ -8,8 +8,68 @@ const nodemailer = require('nodemailer');
 const { ImapFlow } = require('imapflow');
 const crypto = require('crypto');
 
-const sentLog = []; // in-memory send timestamps; resets on cold start
-let lastDispatch = 0; // cooldown for update-now requests
+const sentLog = []; // in-memory fallback send log (resets on cold start / per instance)
+let lastDispatch = 0; // in-memory fallback cooldown for update-now requests
+
+// ---- Durable server-side state (rate limits + send idempotency) ----
+// Stored under /_server in the Realtime Database, which the security rules deny
+// to every client; only this function — authenticated with its runtime service
+// account — can read/write it. This survives cold starts and is shared across
+// instances (unlike the in-memory fallbacks above). EVERY call here is
+// best-effort: any failure falls back to in-memory behaviour so a transient DB
+// problem never blocks a legitimate reply.
+const DB_URL = 'https://mail-brief-gio-default-rtdb.firebaseio.com';
+const SEND_LIMIT_PER_HOUR = 20;
+let _tok = { value: '', exp: 0 };
+
+async function dbToken() {
+  const now = Math.floor(Date.now() / 1000);
+  if (_tok.value && _tok.exp - 60 > now) return _tok.value;
+  const r = await fetch(
+    'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
+    { headers: { 'Metadata-Flavor': 'Google' } });
+  if (!r.ok) throw new Error('metadata token ' + r.status);
+  const d = await r.json();
+  _tok = { value: d.access_token, exp: now + (d.expires_in || 3600) };
+  return _tok.value;
+}
+
+async function dbReq(path, method, val) {
+  const tok = await dbToken();
+  const opts = { method, headers: {} };
+  if (val !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(val); }
+  const r = await fetch(DB_URL + path + '?access_token=' + tok, opts);
+  if (!r.ok) throw new Error('db ' + r.status);
+  return r.json();
+}
+
+// Enforce a rolling one-hour send cap across instances. Returns true if allowed
+// (and records this send); throws on any DB problem so the caller can fall back.
+async function durableRateOk() {
+  const now = Date.now();
+  const cur = (await dbReq('/_server/sends.json', 'GET')) || {};
+  const kept = {};
+  Object.entries(cur).forEach(([k, t]) => { if (now - t < 3600000) kept[k] = t; });
+  if (Object.keys(kept).length >= SEND_LIMIT_PER_HOUR) return false;
+  kept['s' + now] = now;
+  await dbReq('/_server/sends.json', 'PUT', kept);
+  return true;
+}
+
+// Idempotency: a stable id for a specific reply, so a client retry (e.g. the
+// offline outbox re-flushing) can't send the same email twice.
+function idemId(account, to, inReplyTo, body) {
+  return crypto.createHash('sha256')
+    .update([account, to, inReplyTo || '', String(body).slice(0, 4000)].join('|'))
+    .digest('hex').slice(0, 40);
+}
+async function alreadySent(id) {
+  const rec = await dbReq('/_server/idem/' + id + '.json', 'GET');
+  return !!(rec && Date.now() - rec.at < 24 * 3600000);
+}
+async function recordSent(id) {
+  await dbReq('/_server/idem/' + id + '.json', 'PUT', { at: Date.now() });
+}
 
 function keyOk(given) {
   const expected = process.env.MAILBRIEF_ACCESS_KEY || '';
@@ -241,7 +301,9 @@ functions.http('sendReply', async (req, res) => {
     if (!ghToken) {
       return res.status(503).json({ error: 'update-now not set up yet — add the GH_DISPATCH_TOKEN secret and redeploy' });
     }
-    if (Date.now() - lastDispatch < 120000) {
+    let lastRefresh = lastDispatch;
+    try { const rec = await dbReq('/_server/refresh_at.json', 'GET'); if (rec) lastRefresh = Math.max(lastRefresh, rec); } catch (_) {}
+    if (Date.now() - lastRefresh < 120000) {
       return res.json({ ok: true, note: 'already checking' });
     }
     const r = await fetch(
@@ -260,6 +322,7 @@ functions.http('sendReply', async (req, res) => {
     );
     if (r.status === 204) {
       lastDispatch = Date.now();
+      try { await dbReq('/_server/refresh_at.json', 'PUT', Date.now()); } catch (_) {}
       return res.json({ ok: true });
     }
     return res.status(502).json({ error: 'GitHub answered ' + r.status });
@@ -267,7 +330,10 @@ functions.http('sendReply', async (req, res) => {
 
   const now = Date.now();
   while (sentLog.length && now - sentLog[0] > 3600000) sentLog.shift();
-  if (sentLog.length >= 20) return res.status(429).json({ error: 'too many sends this hour' });
+  let rateOk;
+  try { rateOk = await durableRateOk(); }
+  catch (_) { rateOk = sentLog.length < SEND_LIMIT_PER_HOUR; } // DB unavailable — in-memory fallback
+  if (!rateOk) return res.status(429).json({ error: 'too many sends this hour' });
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(to || ''))) {
     return res.status(400).json({ error: 'bad recipient address' });
@@ -279,6 +345,11 @@ functions.http('sendReply', async (req, res) => {
   if (!acct) {
     return res.status(404).json({ error: 'account not connected — add its app password secret first' });
   }
+
+  // Idempotency: if this exact reply was already accepted (e.g. a retry), don't
+  // send it a second time.
+  const idem = idemId(String(account || ''), String(to), inReplyTo, body);
+  try { if (await alreadySent(idem)) return res.json({ ok: true, deduped: true }); } catch (_) { /* best-effort */ }
 
   const transporter = nodemailer.createTransport({
     host: acct.smtpHost,
@@ -302,6 +373,7 @@ functions.http('sendReply', async (req, res) => {
   try {
     await transporter.sendMail(msg);
     sentLog.push(now);
+    try { await recordSent(idem); } catch (_) { /* best-effort */ }
     res.json({ ok: true });
   } catch (e) {
     res.status(502).json({ error: 'send failed: ' + ((e && e.message) || 'unknown') });
