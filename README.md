@@ -10,12 +10,18 @@ junk buried. Seventh member of the Brief family.
 ```
 Local launchd timer (every 5 min while the Mac is on) → triggers GitHub Actions
   (GitHub's own cron is a throttled Mac-off fallback)
-  └─ pipeline/refresh_mail.py
+  └─ pipeline/refresh_mail.py   ← the single canonical mail pipeline
        ├─ fetches recent inbox mail from each account over IMAP
-       ├─ classifies: attention / fyi / junk  (Claude if ANTHROPIC_API_KEY set,
-       │   sender/header heuristics otherwise)
+       ├─ groups messages into threads; extracts bodies (quotes/signatures
+       │   stripped) and attachment metadata
+       ├─ classifies: attention / fyi / junk + per-item action summary & signals
+       │   (OpenRouter/Anthropic if a key is set, sender/header heuristics otherwise)
        └─ publishes compact JSON to Firebase Realtime Database
             └─ /briefs/<ACCESS KEY>   (database denies everything else)
+
+Mail ingestion is a single pipeline (refresh_mail.py). An earlier Gmail-connector
+path (publish_local.py + the "mail-brief-feed" scheduled task) was retired
+2026-07-18 so results never depend on which system ran last.
 
 public/index.html (Firebase Hosting, deployed on push)
   └─ asks for the access key once per device, then renders the brief
