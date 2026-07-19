@@ -1784,10 +1784,10 @@ setupAlerts();
    app is completely unaffected. */
 const FB_CONFIG = {
   apiKey: "AIzaSyAo8dLtUZ9o2LQwpYxaU5sTUKqPl1xqu9Y",
-  // Use the APP's own hosting domain as the auth domain so the sign-in redirect
-  // stays same-origin — this is what fixes signInWithRedirect on installed iOS
-  // PWAs (cross-origin firebaseapp.com storage is walled off by Safari/ITP).
-  authDomain: "mail-brief-gio.web.app",
+  // Reverted to the auto-registered handler domain so sign-in never hits a
+  // redirect_uri_mismatch. (The same-origin web.app handler needs its redirect
+  // URI added to the OAuth client before it can be used — deferred.)
+  authDomain: "mail-brief-gio.firebaseapp.com",
   projectId: "mail-brief-gio",
   appId: "1:664051139279:web:b45f827b45805dbb7b6dba",
   messagingSenderId: "664051139279",
