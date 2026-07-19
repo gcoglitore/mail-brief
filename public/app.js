@@ -984,6 +984,40 @@ function snoozedRow(e) {
   return row;
 }
 
+// ===== Google Calendar agenda (read-only, from BRIEF.calendar) =====
+function eventTimeLabel(e) {
+  if (e.all_day) return "All day";
+  return new Date(e.start * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+function eventDayLabel(ts) {
+  const d = new Date(ts * 1000), now = new Date();
+  const tmr = new Date(now); tmr.setDate(now.getDate() + 1);
+  if (d.toDateString() === now.toDateString()) return "Today";
+  if (d.toDateString() === tmr.toDateString()) return "Tomorrow";
+  return d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
+}
+// A compact "what's on" agenda grouped by day, with the in-progress event marked.
+function renderAgenda(parent) {
+  const events = (BRIEF && Array.isArray(BRIEF.calendar) ? BRIEF.calendar : [])
+    .filter(e => e && e.start);
+  if (!events.length) return;
+  const now = Date.now() / 1000;
+  const wrap = el("div", "agenda");
+  wrap.appendChild(el("div", "agendaHdr", "AGENDA"));
+  let lastDay = null;
+  events.slice(0, 8).forEach(e => {
+    const dl = eventDayLabel(e.start);
+    if (dl !== lastDay) { wrap.appendChild(el("div", "agendaDay", dl)); lastDay = dl; }
+    const live = e.start <= now && (e.end || e.start) > now;
+    const row = el("div", "agendaRow" + (live ? " now" : ""));
+    row.appendChild(el("span", "agendaTime", eventTimeLabel(e)));
+    row.appendChild(el("span", "agendaTitle", e.title || "(busy)"));
+    if (e.location) row.appendChild(el("span", "agendaLoc", e.location));
+    wrap.appendChild(row);
+  });
+  parent.appendChild(wrap);
+}
+
 // Unified priority rail: attention email + unread conversations, grouped by
 // intent (or flat by "Newest"), plus a Snoozed view. The home screen.
 function renderPriority() {
@@ -1027,6 +1061,8 @@ function renderPriority() {
     snoozed.forEach(e => v.appendChild(snoozedRow(e)));
     return;
   }
+
+  if (!SEARCH) renderAgenda(v);   // Google Calendar agenda sits atop the rail
 
   let entries = SEARCH ? active.filter(entryMatchesSearch) : active;
   if (!entries.length) {

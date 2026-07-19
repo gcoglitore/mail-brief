@@ -208,6 +208,23 @@
   .prioFilterBtn.on { color: var(--gold); border-color: var(--gold); }
   .snzUntil { font-size: 12px; color: var(--faint); }
 
+  /* Google Calendar agenda */
+  .agenda { margin: 2px 0 16px; padding: 12px 14px; border-radius: 12px;
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--blue); }
+  .agendaHdr { font-size: 10.5px; letter-spacing: 1.5px; color: var(--dim); font-weight: 800; margin-bottom: 6px; }
+  .agendaDay { font-size: 11px; font-weight: 800; color: var(--gold); margin: 10px 0 4px; }
+  .agenda .agendaHdr + .agendaDay { margin-top: 2px; }
+  .agendaRow { display: flex; align-items: baseline; gap: 10px; padding: 4px 0; }
+  .agendaTime { min-width: 66px; font-size: 12.5px; color: var(--dim);
+    font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .agendaTitle { flex: 1; font-size: 13.5px; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agendaLoc { font-size: 11.5px; color: var(--faint); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 34%; }
+  .agendaRow.now .agendaTime { color: var(--green); font-weight: 700; }
+  .agendaRow.now .agendaTitle { font-weight: 700; }
+  .agendaRow.now::before { content: "●"; color: var(--green); font-size: 10px; align-self: center; }
+
   /* full-screen email reader */
   #reader {
     display: none; position: fixed; inset: 0; z-index: 5; background: var(--bg);

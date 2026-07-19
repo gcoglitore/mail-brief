@@ -598,11 +598,25 @@ def main():
         if kept:
             print(f"Preserved {kept} stale item(s) from failed account(s): {', '.join(sorted(failed_labels))}")
 
+    # Google Calendar agenda (read-only): fetch the user's private "secret iCal
+    # address" if configured. Best-effort — on any failure keep the previously
+    # published agenda rather than blanking it.
+    calendar = prev.get("calendar", []) if isinstance(prev, dict) else []
+    cal_url = os.environ.get("CAL_ICAL_URL", "").strip()
+    if cal_url:
+        try:
+            import calendar_feed
+            calendar = calendar_feed.upcoming_events(cal_url, days=7)
+            print(f"Calendar: {len(calendar)} upcoming event(s)")
+        except Exception as exc:
+            print(f"Calendar skipped (kept previous): {str(exc)[:120]}")
+
     all_items.sort(key=lambda i: i["ts"], reverse=True)
     brief = {
         "generated_at": int(time.time()),
         "accounts": statuses,
         "items": all_items,
+        "calendar": calendar,
         "counts": {b: sum(1 for i in all_items if i["bucket"] == b and not i.get("stale"))
                    for b in ("attention", "fyi", "junk")},
     }

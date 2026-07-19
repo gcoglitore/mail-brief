@@ -11,6 +11,11 @@ function makeBrief() {
   return {
     generated_at: NOW - 300,
     accounts: [{ account: "QLAD", ok: true, count: 2 }],
+    calendar: [
+      { title: "Board call", start: NOW + 3600, end: NOW + 5400, location: "Zoom", all_day: false },
+      { title: "Standup", start: NOW - 600, end: NOW + 600, location: "", all_day: false }, // in progress
+      { title: "Design review", start: NOW + 90000, end: NOW + 93600, location: "Room 2", all_day: false },
+    ],
     items: [
       {
         account: "QLAD",
