@@ -3,7 +3,7 @@ name: Deploy Mail Brief Hosting
 on:
   push:
     branches: [main]
-    paths: ['public/**', 'firebase.json', '.firebaserc']
+    paths: ['public/**', 'firebase.json', '.firebaserc', 'database.rules.json']
   workflow_dispatch:
 
 jobs:

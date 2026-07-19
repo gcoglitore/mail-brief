@@ -1033,6 +1033,7 @@ function openCompose(i) {
   $("composeBody").value = "";
   $("composeErr").textContent = "";
   $("composeWarn").style.display = "none";
+  $("composeSuggest").replaceChildren();  // never carry another email's AI tone chips over
   $("composeSend").disabled = false;
   $("composeSend").textContent = "Send";
   $("composeWrap").style.display = "block";
@@ -1646,9 +1647,13 @@ async function load(key, fromButton) {
       BRIEF = JSON.parse(cached);
       $("keyScreen").style.display = "none";
       $("app").style.display = "block";
-    document.body.classList.add("signed-in");
+      document.body.classList.add("signed-in");
+      loadPrefs();          // restore device prefs (sort/aging/density/channels) offline
+      loadServerSettings(); // best-effort (no-ops offline)
+      await loadFlags();    // restore pins/snoozes from cache so they aren't lost offline
       render();
       updateNetBar(true);
+      loadMessages();       // restore cached Texts/DMs offline
       return;
     } catch (e2) { /* corrupt cache — fall through */ }
   }

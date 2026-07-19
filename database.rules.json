@@ -7,23 +7,34 @@
         ".read": true,
         "subs": {
           ".write": true,
-          "$sid": { ".validate": "!newData.exists() || newData.hasChildren()" }
+          "$sid": {
+            ".validate": "!newData.exists() || (newData.hasChild('sub') && (!newData.hasChild('ua') || newData.child('ua').val().length <= 200))"
+          }
         },
         "msg_outbox": {
           ".write": true,
           "$oid": {
-            ".validate": "!newData.exists() || (newData.hasChild('chatID') && newData.child('chatID').isString() && newData.child('chatID').val().length <= 512 && (!newData.hasChild('text') || (newData.child('text').isString() && newData.child('text').val().length <= 20000)) && (!newData.hasChild('action') || (newData.child('action').isString() && newData.child('action').val().length <= 32)))"
+            ".validate": "!newData.exists() || newData.hasChild('chatID')",
+            "chatID": { ".validate": "newData.isString() && newData.val().length <= 512" },
+            "text": { ".validate": "newData.isString() && newData.val().length <= 20000" },
+            "action": { ".validate": "newData.isString() && newData.val().length <= 32" },
+            "at": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
           }
         },
         "flags": {
           ".write": true,
           "$fid": {
-            ".validate": "!newData.exists() || ((!newData.hasChild('pin') || newData.child('pin').isBoolean()) && (!newData.hasChild('snooze') || newData.child('snooze').isNumber()))"
+            ".validate": "!newData.exists() || newData.hasChildren()",
+            "pin": { ".validate": "newData.isBoolean()" },
+            "snooze": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
           }
         },
         "settings": {
           ".write": true,
-          "group_threads": { ".validate": "newData.isBoolean()" }
+          "group_threads": { ".validate": "newData.isBoolean()" },
+          "$other": { ".validate": false }
         }
       }
     }

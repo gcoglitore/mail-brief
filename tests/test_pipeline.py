@@ -178,6 +178,23 @@ class ExtractTextEdges(unittest.TestCase):
         m.set_param("charset", "x-unknown-charset")
         self.assertIn("hello", rm.extract_text(m))
 
+    def test_inline_body_with_filename_is_kept(self):
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        m = MIMEMultipart()
+        part = MIMEText("The real inline body text", "plain")
+        part.add_header("Content-Disposition", "inline", filename="message.txt")
+        m.attach(part)
+        self.assertIn("real inline body", rm.extract_text(m))
+
+
+class DecodeHeaderEdges(unittest.TestCase):
+    def test_unknown_charset_header_does_not_raise(self):
+        # base64 "hello" tagged with a bogus charset name
+        out = rm.decode_header("=?x-bogus-charset?B?aGVsbG8=?=")
+        self.assertIsInstance(out, str)
+        self.assertIn("hello", out)
+
 
 class ThreadBucketEscalation(unittest.TestCase):
     def test_thread_takes_most_important_bucket_not_latest(self):

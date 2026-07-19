@@ -9,6 +9,7 @@ const { ImapFlow } = require('imapflow');
 const crypto = require('crypto');
 
 const sentLog = []; // in-memory fallback send log (resets on cold start / per instance)
+const draftLog = []; // in-memory fallback draft log
 let lastDispatch = 0; // in-memory fallback cooldown for update-now requests
 
 // ---- Durable server-side state (rate limits + send idempotency) ----
@@ -247,10 +248,14 @@ functions.http('sendReply', async (req, res) => {
   if (!keyOk(key)) return res.status(401).json({ error: 'bad key' });
 
   if (action === 'draft') {
-    try { if ((await durableCount('/_server/drafts.json')) >= DRAFT_LIMIT_PER_HOUR)
-      return res.status(429).json({ error: 'too many AI drafts this hour' }); } catch (_) { /* best-effort */ }
+    const dnow = Date.now();
+    while (draftLog.length && dnow - draftLog[0] > 3600000) draftLog.shift();
+    let draftOver;
+    try { draftOver = (await durableCount('/_server/drafts.json')) >= DRAFT_LIMIT_PER_HOUR; }
+    catch (_) { draftOver = draftLog.length >= DRAFT_LIMIT_PER_HOUR; } // DB down — in-memory fallback
+    if (draftOver) return res.status(429).json({ error: 'too many AI drafts this hour' });
     const out = await draftReplies(req.body.kind, req.body.sender, subject, body, req.body.intent, req.body.tone);
-    if (!out.error) { try { await recordUse('/_server/drafts.json'); } catch (_) {} }
+    if (!out.error) { draftLog.push(dnow); try { await recordUse('/_server/drafts.json'); } catch (_) {} }
     return res.status(out.error ? 503 : 200).json(out.error ? out : { ok: true, options: out.options, missing: out.missing || [] });
   }
 
@@ -407,13 +412,13 @@ functions.http('sendReply', async (req, res) => {
   const msg = {
     from: acct.email,
     to: toStr,
-    subject: String(subject || '').slice(0, 300),
+    subject: String(subject || '').replace(/[\r\n]/g, ' ').slice(0, 300),  // no header injection
     text: String(body),
   };
   if (inReplyTo) {
-    const id = '<' + String(inReplyTo).replace(/[<>]/g, '') + '>';
+    const id = '<' + String(inReplyTo).replace(/[<>\r\n]/g, '') + '>';
     msg.inReplyTo = id;
-    msg.references = (references ? String(references).slice(0, 2000) + ' ' : '') + id;
+    msg.references = (references ? String(references).replace(/[\r\n]/g, ' ').slice(0, 2000) + ' ' : '') + id;
   }
 
   try {

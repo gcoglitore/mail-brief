@@ -50,7 +50,10 @@ def decode_header(value):
     out = []
     for text, charset in parts:
         if isinstance(text, bytes):
-            out.append(text.decode(charset or "utf-8", errors="replace"))
+            try:  # an unknown charset name must not drop the whole message
+                out.append(text.decode(charset or "utf-8", errors="replace"))
+            except LookupError:
+                out.append(text.decode("utf-8", errors="replace"))
         else:
             out.append(text)
     return " ".join(out).strip()
@@ -128,7 +131,12 @@ def extract_text(msg):
     """Extract readable plain text (paragraphs preserved, quotes/signatures
     stripped) from a message, preferring text/plain then text/html."""
     def is_body(p):  # a body part, not a file attachment
-        return not p.get_filename() and p.get_content_disposition() != "attachment"
+        disp = p.get_content_disposition()
+        if disp == "attachment":
+            return False
+        if disp == "inline":
+            return True                    # inline parts are body even if they carry a filename
+        return not p.get_filename()        # no disposition: a bare filename implies attachment
     part = msg
     if msg.is_multipart():
         part = None
