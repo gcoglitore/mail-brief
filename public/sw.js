@@ -2,7 +2,7 @@
 // Mail data itself is cached by the page in localStorage; replies written
 // offline queue in the page's outbox. This worker only guarantees the app
 // opens with no connection.
-const CACHE = "mailbrief-shell-v3";
+const CACHE = "mailbrief-shell-v4";
 const SHELL = ["/", "/manifest.json", "/icon-180.png"];
 
 self.addEventListener("install", e => {
@@ -50,8 +50,13 @@ self.addEventListener("fetch", e => {
   e.respondWith(
     fetch(e.request)
       .then(resp => {
-        const copy = resp.clone();
-        caches.open(CACHE).then(c => c.put(e.request, copy));
+        // Only cache a good, same-origin response. A transient 5xx/404/opaque
+        // response must never overwrite the last known-good shell, or the app
+        // would serve that error page while offline.
+        if (resp && resp.ok && resp.type === "basic") {
+          const copy = resp.clone();
+          caches.open(CACHE).then(c => c.put(e.request, copy));
+        }
         return resp;
       })
       .catch(() => caches.match(e.request, { ignoreSearch: true })

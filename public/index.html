@@ -240,8 +240,14 @@
     background: var(--panel2); border: 1px solid var(--line); color: var(--dim); }
   .whyChip.act { color: var(--gold); border-color: rgba(212,168,67,.5); }
   .whyChip.whenChip { color: var(--blue); border-color: rgba(74,134,232,.5); }
-  .attChip { font-size: 12px; padding: 5px 10px; border-radius: 8px; background: var(--panel2);
-    border: 1px solid var(--line); color: var(--text); }
+  /* Attachments are informational metadata, not openable links — styled quiet
+     (no button affordance) with the file type called out. */
+  .attChip { font-size: 12px; padding: 4px 10px; border-radius: 8px; background: transparent;
+    border: 1px dashed var(--line); color: var(--dim); cursor: default;
+    display: inline-flex; align-items: center; gap: 6px; }
+  .attChip .attType { font-size: 10px; font-weight: 800; letter-spacing: .5px; color: var(--gold); }
+  .attChip .attName { color: var(--text); }
+  .attChip .attSize { color: var(--faint); }
   #readerThread { display: none; margin: 4px 0 14px; }
   #readerThread .threadHdr { font-size: 10px; letter-spacing: 1.5px; color: var(--dim);
     font-weight: 800; margin-bottom: 8px; }
@@ -261,6 +267,13 @@
   .openLink { color: var(--blue); font-size: 13px; text-decoration: none; }
   #readerDone { color: var(--green); border-color: var(--green); }
   #readerDraft { color: var(--gold); border-color: var(--gold); }
+  #readerMore { display: none; }
+  /* #5 Reduce reader congestion: on narrow screens keep only Archive · Reply ·
+     More visible; Draft / Pin / Snooze / Open move into the More menu. */
+  @media (max-width: 620px) {
+    #readerDraft, #readerSnooze, #readerPin, #readerOpen { display: none !important; }
+    #readerMore { display: inline-block; }
+  }
   #composeSuggest { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
   .sugChip { text-align: left; padding: 8px 12px; border-radius: 9px; border: 1px solid var(--line);
     background: var(--panel2); color: var(--text); font-size: 13px; cursor: pointer; line-height: 1.4; }
@@ -341,6 +354,7 @@
     background: var(--panel); color: var(--dim); font-size: 14px; font-weight: 700; cursor: pointer;
   }
   .vtab.on { background: var(--gold); border-color: var(--gold); color: #14100a; }
+  .vtab .vtIco { display: none; }  /* icons appear only in the mobile bottom nav */
   .tabBadge { display: none; }
   .tabBadge.show {
     display: inline-block; margin-left: 7px; background: var(--red); color: #fff;
@@ -436,9 +450,15 @@
       background: var(--panel2); border-top: 1px solid var(--line);
       padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
     }
-    .vtab { border: 0; background: none; border-radius: 10px; font-size: 11px; font-weight: 700;
-      color: var(--dim); padding: 8px 0; }
+    .vtab { border: 0; background: none; border-radius: 10px; font-weight: 700;
+      color: var(--dim); padding: 7px 0 6px; position: relative;
+      display: flex; flex-direction: column; align-items: center; gap: 3px; }
     .vtab.on { background: none; color: var(--gold); }
+    .vtab .vtIco { display: block; }
+    .vtab .vtLabel { font-size: 10.5px; letter-spacing: .2px; }
+    /* Small badge tucked over the icon's top-right, not pushing the label. */
+    .tabBadge.show { position: absolute; top: 2px; right: calc(50% - 22px); margin: 0;
+      min-width: 15px; height: 15px; line-height: 15px; padding: 0 4px; font-size: 9.5px; }
     .wrap { padding-bottom: 76px; }  /* clear the fixed bar */
   }
   /* ---- Desktop two-pane layout (wide screens only; phone view untouched) ---- */
@@ -481,10 +501,10 @@
   <div id="app" style="display:none">
     <div id="netBar"></div>
     <div id="viewTabs" role="tablist" aria-label="Views">
-      <button id="tabPriority" class="vtab on" role="tab" aria-selected="true">Priority<span id="prioBadge" class="tabBadge"></span></button>
-      <button id="tabMail" class="vtab" role="tab" aria-selected="false">All Mail<span id="mailBadge" class="tabBadge"></span></button>
-      <button id="tabMsg" class="vtab" role="tab" aria-selected="false">Texts<span id="msgBadge" class="tabBadge"></span></button>
-      <button id="tabDM" class="vtab" role="tab" aria-selected="false">DMs<span id="dmBadge" class="tabBadge"></span></button>
+      <button id="tabPriority" class="vtab on" role="tab" aria-selected="true" tabindex="0"><svg class="vtIco" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l2.9 6.1 6.6.6-5 4.4 1.5 6.5L12 17.3 5.5 20.6 7 14.1 2 9.7l6.6-.6z"/></svg><span class="vtLabel">Priority</span><span id="prioBadge" class="tabBadge"></span></button>
+      <button id="tabMail" class="vtab" role="tab" aria-selected="false" tabindex="-1"><svg class="vtIco" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg><span class="vtLabel">All Mail</span><span id="mailBadge" class="tabBadge"></span></button>
+      <button id="tabMsg" class="vtab" role="tab" aria-selected="false" tabindex="-1"><svg class="vtIco" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.5L3.5 20.5l1.5-5.1A8.4 8.4 0 1 1 21 11.5z"/></svg><span class="vtLabel">Texts</span><span id="msgBadge" class="tabBadge"></span></button>
+      <button id="tabDM" class="vtab" role="tab" aria-selected="false" tabindex="-1"><svg class="vtIco" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.1"/><path d="M3.6 20a5.4 5.4 0 0 1 10.8 0"/><path d="M16 5.3a3.1 3.1 0 0 1 0 5.9"/><path d="M18.4 20a5.4 5.4 0 0 0-3-4.8"/></svg><span class="vtLabel">DMs</span><span id="dmBadge" class="tabBadge"></span></button>
     </div>
     <input id="searchBox" type="search" placeholder="Search…" autocomplete="off">
     <div id="briefStrip"></div>
@@ -527,12 +547,13 @@
     <div id="readerWhy"></div>
     <div id="readerAttach"></div>
     <div id="readerActions">
-      <button class="replyBtn" id="readerDone" style="margin-top:0" title="Archives this email out of your inbox (reversible)">✓ Done</button>
+      <button class="replyBtn" id="readerDone" style="margin-top:0" title="Files this email out of your inbox (reversible)">Archive</button>
       <button class="replyBtn" id="readerReply" style="margin-top:0">Reply</button>
       <button class="replyBtn" id="readerDraft" style="margin-top:0">✨ Draft</button>
       <button class="replyBtn" id="readerSnooze" style="margin-top:0">⏰ Snooze</button>
       <button class="replyBtn" id="readerPin" style="margin-top:0">📌 Pin</button>
       <a class="openLink" id="readerOpen" target="_blank" rel="noopener">Open in mailbox ↗</a>
+      <button class="replyBtn" id="readerMore" style="margin-top:0" aria-haspopup="menu">More ⋯</button>
     </div>
     <div id="readerThread"></div>
     <div id="readerBody"></div>
@@ -545,10 +566,10 @@
 
 <div id="toast"></div>
 <div id="snoozeMenu"></div>
-<div id="settingsWrap"><div id="settingsSheet" role="dialog" aria-label="Preferences"></div></div>
+<div id="settingsWrap"><div id="settingsSheet" role="dialog" aria-modal="true" aria-label="Preferences"></div></div>
 
 <div id="composeWrap">
-  <div id="composeSheet">
+  <div id="composeSheet" role="dialog" aria-modal="true" aria-labelledby="composeTitle">
     <h3 id="composeTitle">REPLY</h3>
     <input id="composeTo" type="email" placeholder="To">
     <input id="composeSubj" type="text" placeholder="Subject">
@@ -617,11 +638,30 @@ function writeGroupThreads(v) {
   showToast("Thread grouping " + (v ? "on" : "off") + " — applies on next refresh", { state: "ok", ms: 3500 });
 }
 
-function openSettings() {
+// ===== Dialog focus management (a11y) =====
+// Trap Tab inside an open sheet; restore focus to the launcher on close.
+function focusables(container) {
+  return [...container.querySelectorAll(
+    'button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])')]
+    .filter(x => !x.disabled && x.offsetParent !== null);
+}
+function trapTab(container, e) {
+  if (e.key !== "Tab") return;
+  const f = focusables(container);
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}
+let _settingsTrigger = null, _composeTrigger = null;
+
+function openSettings(reopen) {
   const sheet = $("settingsSheet");
+  // On a re-render (a toggle was flipped) keep the keyboard user's place.
+  const prevIdx = reopen ? focusables(sheet).indexOf(document.activeElement) : -1;
   sheet.replaceChildren();
   sheet.appendChild(el("h3", "setTitle", "Preferences"));
-  const change = () => { savePrefs(); openSettings(); reRenderActive(); renderDeskPane(); };
+  const change = () => { savePrefs(); openSettings(true); reRenderActive(); renderDeskPane(); };
   const seg = (label, opts, cur, set) => {
     const row = el("div", "setRow");
     row.appendChild(el("div", "setLabel", label));
@@ -661,8 +701,22 @@ function openSettings() {
   done.addEventListener("click", closeSettings);
   sheet.appendChild(done);
   $("settingsWrap").style.display = "flex";
+  sheet.onkeydown = ev => {
+    if (ev.key === "Escape") { ev.preventDefault(); closeSettings(); }
+    else trapTab(sheet, ev);
+  };
+  if (!reopen) {
+    _settingsTrigger = $("prefsBtn");
+    const f = focusables(sheet); if (f.length) f[0].focus();
+  } else if (prevIdx >= 0) {
+    const f = focusables(sheet); (f[prevIdx] || f[0] || sheet).focus();
+  }
 }
-function closeSettings() { $("settingsWrap").style.display = "none"; }
+function closeSettings() {
+  $("settingsWrap").style.display = "none";
+  $("settingsSheet").onkeydown = null;
+  if (_settingsTrigger) { _settingsTrigger.focus(); _settingsTrigger = null; }
+}
 
 // Case-insensitive: does the (already-lowercased) query appear in any field?
 function matchText(q) {
@@ -750,8 +804,8 @@ function card(i, cls) {
       foot.appendChild(rb);
     }
     if (i.msgid) {
-      const db = el("button", "rowBtn", "Done");
-      db.title = "Archives this email out of your inbox (reversible)";
+      const db = el("button", "rowBtn", "Archive");
+      db.title = "Files this email out of your inbox (reversible)";
       db.addEventListener("click", e => { e.preventDefault(); e.stopPropagation(); archiveItem(i); });
       foot.appendChild(db);
     }
@@ -785,12 +839,22 @@ function markRead(i) {
 function fmtSize(n) {
   return n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : n > 1024 ? Math.round(n / 1024) + " KB" : n + " B";
 }
+// File type from an attachment name, for the honest attachment chips.
+function fileType(name) {
+  const m = /\.([a-z0-9]{1,5})$/i.exec(name || "");
+  return m ? m[1].toUpperCase() : "FILE";
+}
+// Plain-language reasons an item is in Priority (not mechanical signal names).
 function whyPriority(i) {
   const s = i.signals || {}, out = [];
-  if (s.reply) out.push("needs a reply");
-  if (s.meeting) out.push("about a meeting");
-  if (s.doc) out.push("document to review");
-  if (isOverdue(i.ts)) out.push("overdue");
+  const text = (i.subject || "") + " " + (i.snippet || "");
+  if (s.reply) out.push(/\?/.test(text) ? "Has a direct question" : "Needs your reply");
+  if (s.meeting) out.push("About a meeting or time");
+  if (s.doc) out.push("Document to review or sign");
+  if (isOverdue(i.ts)) {
+    const days = Math.floor((Date.now() / 1000 - (i.ts || 0)) / 86400);
+    out.push(days >= 1 ? "Waiting " + days + " day" + (days === 1 ? "" : "s") : "Overdue");
+  }
   return out;
 }
 // Light date/time detection for a "when" chip — best-effort, not a parser.
@@ -817,10 +881,16 @@ function openReader(i) {
   if (when) why.appendChild(el("span", "whyChip whenChip", "📅 " + when));
   why.style.display = why.children.length ? "flex" : "none";
 
-  // Attachments
+  // Attachments — informational only (not openable here); typed + sized.
   const at = $("readerAttach"); at.replaceChildren();
-  (i.attachments || []).forEach(a => at.appendChild(
-    el("span", "attChip", "📎 " + a.name + (a.size ? " · " + fmtSize(a.size) : ""))));
+  (i.attachments || []).forEach(a => {
+    const chip = el("span", "attChip");
+    chip.title = "Attachment — open this email in your mailbox to view it";
+    chip.appendChild(el("span", "attType", fileType(a.name)));
+    chip.appendChild(el("span", "attName", a.name || "attachment"));
+    if (a.size) chip.appendChild(el("span", "attSize", "· " + fmtSize(a.size)));
+    at.appendChild(chip);
+  });
   at.style.display = at.children.length ? "flex" : "none";
 
   // Earlier in this thread
@@ -840,13 +910,18 @@ function openReader(i) {
   } else { th.style.display = "none"; }
 
   const link = safeLink(i.link);
+  const repliable = !!(i.reply_to && i.msgid);
   $("readerOpen").style.display = link ? "inline" : "none";
   if (link) $("readerOpen").href = link;
-  $("readerReply").style.display = (i.reply_to && i.msgid) ? "inline-block" : "none";
+  $("readerReply").style.display = repliable ? "inline-block" : "none";
+  $("readerDraft").style.display = repliable ? "inline-block" : "none";
   const id = entryId(i);
   $("readerPin").textContent = isPinned(id) ? "📌 Unpin" : "📌 Pin";
   $("readerPin").style.display = id ? "inline-block" : "none";
   $("readerSnooze").style.display = id ? "inline-block" : "none";
+  // Narrow-screen "More" holds Draft/Pin/Snooze/Open — show it only when it
+  // would carry at least one action (CSS keeps it hidden on wide screens).
+  $("readerMore").style.display = (repliable || id || link) ? "" : "none";
   $("reader").style.display = "block";
   $("reader").scrollTop = 0;
 }
@@ -1026,7 +1101,9 @@ async function markAllRead() {
 }
 
 function openCompose(i) {
+  if (!i || !i.reply_to) return;  // non-repliable (FYI/junk) — no address to reply to
   composeItem = i;
+  if (!_composeTrigger) _composeTrigger = document.activeElement;
   $("composeTitle").textContent = "REPLY FROM " + i.account;
   $("composeTo").value = i.reply_to;
   $("composeSubj").value = /^re:/i.test(i.subject || "") ? i.subject : "Re: " + (i.subject || "");
@@ -1037,12 +1114,19 @@ function openCompose(i) {
   $("composeSend").disabled = false;
   $("composeSend").textContent = "Send";
   $("composeWrap").style.display = "block";
+  const sheet = $("composeSheet");
+  sheet.onkeydown = ev => {
+    if (ev.key === "Escape") { ev.preventDefault(); closeCompose(); }
+    else trapTab(sheet, ev);
+  };
   $("composeBody").focus();
 }
 
 function closeCompose() {
   $("composeWrap").style.display = "none";
+  $("composeSheet").onkeydown = null;
   composeItem = null;
+  if (_composeTrigger) { try { _composeTrigger.focus(); } catch (_) {} _composeTrigger = null; }
 }
 
 async function sendReply() {
@@ -1127,6 +1211,7 @@ async function flushOutbox() {
   if (!q.length) return;
   flushing = true;
   const remaining = [];
+  const dropped = [];   // permanently rejected (4xx) — removed, not retried
   let sentCount = 0;
   for (let n = 0; n < q.length; n++) {
     const entry = q[n];
@@ -1143,13 +1228,24 @@ async function flushOutbox() {
     }
     const data = await r.json().catch(() => ({}));
     if (r.ok && data.ok) { sentCount++; }
-    else { entry.error = data.error || "rejected"; remaining.push(entry); }
+    else if (r.status >= 400 && r.status < 500) {
+      // Permanent rejection (bad recipient, removed account). Retrying can never
+      // succeed, so drop it from the outbox and surface it instead of looping.
+      dropped.push(data.error || ("rejected (" + r.status + ")"));
+    } else {
+      entry.error = data.error || "rejected"; remaining.push(entry);  // transient (5xx) — keep
+    }
   }
   setOutbox(remaining);
   flushing = false;
   if (sentCount) {
     updateNetBar(undefined, "✓ " + sentCount + (sentCount === 1 ? " queued reply" : " queued replies") + " sent");
     setTimeout(() => updateNetBar(), 5000);
+  }
+  if (dropped.length) {
+    const n = dropped.length;
+    showToast(n + (n === 1 ? " reply couldn't be delivered" : " replies couldn't be delivered")
+      + " — " + dropped[0], { state: "fail", ms: 7000 });
   }
 }
 
@@ -1343,25 +1439,24 @@ function closeRowMenu(restoreFocus) {
   if (restoreFocus && _menuTrigger) _menuTrigger.focus();
   _menuTrigger = null;
 }
-function openRowMenu(e, anchorBtn) {
-  const id = entryId(e);
-  if (!id) return;
+// Generic popup menu anchored to a button. entries: {label, fn} action rows,
+// or {title} section labels. Handles role=menu, arrow keys, Escape, focus.
+function showMenu(anchorBtn, entries) {
   const menu = $("snoozeMenu");
   menu.replaceChildren();
   menu.setAttribute("role", "menu");
   _menuTrigger = anchorBtn;
   const items = [];
-  const addItem = (label, fn) => {
-    const b = el("button", "snzOpt", label);
+  entries.forEach(en => {
+    if (en.title) { menu.appendChild(el("div", "snzTitle", en.title)); return; }
+    const b = el("button", "snzOpt", en.label);
     b.setAttribute("role", "menuitem");
     b.tabIndex = -1;
-    b.addEventListener("click", () => { closeRowMenu(true); fn(); });
+    b.addEventListener("click", () => { closeRowMenu(true); en.fn(); });
     menu.appendChild(b);
     items.push(b);
-  };
-  addItem(isPinned(id) ? "Unpin" : "Pin to top", () => togglePin(id));
-  menu.appendChild(el("div", "snzTitle", "Snooze until…"));
-  SNOOZE_PRESETS.forEach(p => addItem(p.label, () => snoozeTo(id, p)));
+  });
+  if (!items.length) return;
   menu.style.display = "block";
   const r = anchorBtn.getBoundingClientRect();
   menu.style.top = Math.min(r.bottom + 6, window.innerHeight - menu.offsetHeight - 10) + "px";
@@ -1373,6 +1468,30 @@ function openRowMenu(e, anchorBtn) {
     else if (ev.key === "ArrowUp") { ev.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
   };
   items[0].focus();
+}
+
+function openRowMenu(e, anchorBtn) {
+  const id = entryId(e);
+  if (!id) return;
+  showMenu(anchorBtn, [
+    { label: isPinned(id) ? "Unpin" : "Pin to top", fn: () => togglePin(id) },
+    { title: "Snooze until…" },
+    ...SNOOZE_PRESETS.map(p => ({ label: p.label, fn: () => snoozeTo(id, p) })),
+  ]);
+}
+
+// Reader overflow menu (narrow screens): the actions collapsed out of the bar.
+function openReaderMenu(anchorBtn) {
+  const i = readerItem;
+  if (!i) return;
+  const id = entryId(i);
+  const link = safeLink(i.link);
+  const entries = [];
+  if (i.reply_to && i.msgid) entries.push({ label: "✨ Draft a reply", fn: () => draftReply(i) });
+  if (id) entries.push({ label: isPinned(id) ? "Unpin" : "Pin to top", fn: () => togglePin(id) });
+  if (id) entries.push({ label: "⏰ Snooze…", fn: () => openRowMenu(i, anchorBtn) });
+  if (link) entries.push({ label: "Open in mailbox ↗", fn: () => window.open(link, "_blank", "noopener") });
+  showMenu(anchorBtn, entries);
 }
 document.addEventListener("click", e => {
   const m = $("snoozeMenu");
@@ -1729,7 +1848,7 @@ $("searchToggle").addEventListener("click", () => {
   if (open) $("searchBox").focus();
   else { $("searchBox").value = ""; SEARCH = ""; reRenderActive(); }
 });
-$("prefsBtn").addEventListener("click", openSettings);
+$("prefsBtn").addEventListener("click", () => openSettings());
 $("settingsWrap").addEventListener("click", e => { if (e.target === $("settingsWrap")) closeSettings(); });
 
 $("readerBack").addEventListener("click", closeReader);
@@ -1754,6 +1873,7 @@ $("readerBack").addEventListener("click", closeReader);
 $("readerReply").addEventListener("click", () => { if (readerItem) openCompose(readerItem); });
 $("readerDraft").addEventListener("click", () => { if (readerItem) draftReply(readerItem); });
 $("readerSnooze").addEventListener("click", e => { e.stopPropagation(); if (readerItem) openRowMenu(readerItem, $("readerSnooze")); });
+$("readerMore").addEventListener("click", e => { e.stopPropagation(); if (readerItem) openReaderMenu($("readerMore")); });
 $("readerPin").addEventListener("click", () => {
   if (!readerItem) return;
   const id = entryId(readerItem);
@@ -1775,6 +1895,7 @@ const TONE_CHIPS = [
 // generates a single reply in that tone, with any unknown detail left as a
 // highlighted [placeholder] you must fill before sending.
 function draftReply(i) {
+  if (!i || !i.reply_to) return;   // nothing to reply to
   openCompose(i);
   const sug = $("composeSuggest");
   sug.replaceChildren();
@@ -1795,7 +1916,8 @@ async function generateDraft(i, tone, chipEl) {
   const sug = $("composeSuggest");
   [...sug.querySelectorAll(".toneChip")].forEach(c => c.classList.remove("on"));
   if (chipEl) chipEl.classList.add("on");
-  let note = sug.querySelector(".sugNote");
+  // Match either state so a prior error line is reused, not duplicated.
+  let note = sug.querySelector(".sugNote, .sugErr");
   if (!note) { note = el("div", "sugNote"); sug.insertBefore(note, sug.firstChild); }
   note.className = "sugNote"; note.textContent = "✨ drafting in your voice…";
   const key = localStorage.getItem("mailbrief_key");
@@ -2042,7 +2164,11 @@ function switchView(which) {
   $("mailView").style.display = isMail ? "block" : "none";
   $("msgView").style.display = isMsg ? "block" : "none";
   [["tabPriority", isPrio], ["tabMail", isMail], ["tabMsg", which === "msg"], ["tabDM", which === "dm"]]
-    .forEach(([id, on]) => { $(id).classList.toggle("on", on); $(id).setAttribute("aria-selected", String(on)); });
+    .forEach(([id, on]) => {
+      $(id).classList.toggle("on", on);
+      $(id).setAttribute("aria-selected", String(on));
+      $(id).tabIndex = on ? 0 : -1;   // roving tabindex: only the active tab is in the tab order
+    });
   if (isMsg) $("briefStrip").classList.add("hidden"); // brief strip only on priority/mail
   if (isPrio) { renderPriority(); loadMessages(); }  // load msgs so the merge is complete
   else if (isMail) { if (BRIEF) render(); }
@@ -2053,6 +2179,22 @@ $("tabPriority").addEventListener("click", () => switchView("priority"));
 $("tabMail").addEventListener("click", () => switchView("mail"));
 $("tabMsg").addEventListener("click", () => switchView("msg"));
 $("tabDM").addEventListener("click", () => switchView("dm"));
+// Arrow-key navigation between tabs (WAI-ARIA tablist pattern).
+$("viewTabs").addEventListener("keydown", e => {
+  const order = ["tabPriority", "tabMail", "tabMsg", "tabDM"];
+  const views = { tabPriority: "priority", tabMail: "mail", tabMsg: "msg", tabDM: "dm" };
+  const idx = order.indexOf(e.target.id);
+  if (idx < 0) return;
+  let n = -1;
+  if (e.key === "ArrowRight" || e.key === "ArrowDown") n = (idx + 1) % order.length;
+  else if (e.key === "ArrowLeft" || e.key === "ArrowUp") n = (idx - 1 + order.length) % order.length;
+  else if (e.key === "Home") n = 0;
+  else if (e.key === "End") n = order.length - 1;
+  else return;
+  e.preventDefault();
+  switchView(views[order[n]]);
+  $(order[n]).focus();
+});
 $("searchBox").addEventListener("input", e => {
   SEARCH = e.target.value.trim().toLowerCase();
   if (VIEW === "priority") renderPriority();
@@ -2066,7 +2208,12 @@ document.addEventListener("keydown", e => {
   const typing = e.target && e.target.matches && e.target.matches("input, textarea");
   if (e.key === "Escape") {
     if (typing) { e.target.blur(); return; }
-    closeSettings(); closeCompose(); closeReader(); closeThread(); $("app").classList.remove("search-open");
+    closeSettings(); closeCompose(); closeReader(); closeThread();
+    if ($("app").classList.contains("search-open")) {
+      // Also clear the query — otherwise the lists stay filtered by a now-hidden search.
+      $("app").classList.remove("search-open");
+      $("searchBox").value = ""; SEARCH = ""; reRenderActive();
+    }
     return;
   }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -2100,7 +2247,8 @@ $("threadInput").addEventListener("keydown", e => { if (e.key === "Enter") sendM
 // Magic-link sign-in: the access key may arrive in the URL fragment (#k=...).
 // Fragments never leave the device — they aren't sent to any server.
 if (location.hash.startsWith("#k=")) {
-  const k = location.hash.slice(3).trim();
+  let k = location.hash.slice(3).trim();
+  try { k = decodeURIComponent(k); } catch (_) { /* leave raw if malformed */ }
   if (k) localStorage.setItem("mailbrief_key", k);
   history.replaceState(null, "", location.pathname);
 }

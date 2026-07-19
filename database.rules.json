@@ -8,7 +8,21 @@
         "subs": {
           ".write": true,
           "$sid": {
-            ".validate": "!newData.exists() || (newData.hasChild('sub') && (!newData.hasChild('ua') || newData.child('ua').val().length <= 200))"
+            ".validate": "!newData.exists() || newData.hasChild('sub')",
+            "sub": {
+              ".validate": "newData.hasChild('endpoint')",
+              "endpoint": { ".validate": "newData.isString() && newData.val().length <= 1024" },
+              "expirationTime": { ".validate": "newData.isNumber()" },
+              "keys": {
+                "p256dh": { ".validate": "newData.isString() && newData.val().length <= 256" },
+                "auth": { ".validate": "newData.isString() && newData.val().length <= 256" },
+                "$other": { ".validate": false }
+              },
+              "$other": { ".validate": false }
+            },
+            "ua": { ".validate": "newData.isString() && newData.val().length <= 200" },
+            "at": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
           }
         },
         "msg_outbox": {
