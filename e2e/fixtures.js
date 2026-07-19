@@ -86,6 +86,9 @@ function makeMsgs() {
 }
 
 async function mockBackend(page, state) {
+  // Keep tests hermetic: the Firebase Auth SDK (loaded from gstatic) never loads,
+  // so the Account row just shows "Sign in" and no auth network happens.
+  await page.route(/gstatic\.com\/firebasejs/, (route) => route.abort());
   await page.route(/firebaseio\.com/, async (route) => {
     const req = route.request();
     const p = new URL(req.url()).pathname;

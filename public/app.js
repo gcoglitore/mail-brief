@@ -109,6 +109,12 @@ function openSettings(reopen) {
   toggle("Show FYI section", PREFS.showFyi, v => { PREFS.showFyi = v; });
   sheet.appendChild(el("div", "setGroup", "EMAIL"));
   toggle("Group into conversations", PREFS.groupThreads, v => { PREFS.groupThreads = v; writeGroupThreads(v); });
+  // Firebase Auth (Stage 1: additive — signing in does NOT yet change how your
+  // mail loads; your access key stays in charge. This just proves sign-in works.)
+  sheet.appendChild(el("div", "setGroup", "ACCOUNT (BETA)"));
+  const authRow = el("div", "setRow"); authRow.id = "authRow";
+  fillAuthRow(authRow);
+  sheet.appendChild(authRow);
   const done = el("button", "setClose", "Done");
   done.addEventListener("click", closeSettings);
   sheet.appendChild(done);
@@ -1770,3 +1776,71 @@ async function enableAlerts() {
   }
 }
 setupAlerts();
+
+/* ===== Firebase Auth — STAGE 1 (additive; does NOT gate data access yet) =====
+   Google sign-in runs ALONGSIDE the access key. The key still drives every read
+   and write; this only proves sign-in works on each device before we enforce it.
+   Everything here is failure-tolerant: if the SDK can't load (offline/CDN), the
+   app is completely unaffected. */
+const FB_CONFIG = {
+  apiKey: "AIzaSyAo8dLtUZ9o2LQwpYxaU5sTUKqPl1xqu9Y",
+  authDomain: "mail-brief-gio.firebaseapp.com",
+  projectId: "mail-brief-gio",
+  appId: "1:664051139279:web:b45f827b45805dbb7b6dba",
+  messagingSenderId: "664051139279",
+};
+const AUTH_ALLOWED = ["gcoglitore@gmail.com"];  // authorized sign-in identities
+const FB_SDK = "https://www.gstatic.com/firebasejs/11.0.2/";
+let _fbMod = null, _fbAuth = null, _fbUser = null;
+
+async function fbLoad() {
+  if (_fbAuth) return;
+  const [appMod, authMod] = await Promise.all([
+    import(FB_SDK + "firebase-app.js"),
+    import(FB_SDK + "firebase-auth.js"),
+  ]);
+  _fbMod = authMod;
+  _fbAuth = authMod.getAuth(appMod.initializeApp(FB_CONFIG));
+  authMod.onAuthStateChanged(_fbAuth, u => { _fbUser = u; renderAuthRow(); });
+  try { await authMod.getRedirectResult(_fbAuth); } catch (_) {}  // returning from Google
+}
+async function fbSignIn() {
+  try {
+    await fbLoad();
+    const provider = new _fbMod.GoogleAuthProvider();
+    provider.setCustomParameters({ login_hint: AUTH_ALLOWED[0], prompt: "select_account" });
+    await _fbMod.signInWithRedirect(_fbAuth, provider);  // redirect (works in installed PWAs)
+  } catch (e) {
+    showToast("Sign-in isn't available right now — your key still works", { state: "fail", ms: 3500 });
+  }
+}
+async function fbSignOut() {
+  try { await fbLoad(); await _fbMod.signOut(_fbAuth); } catch (_) {}
+}
+// Fill the Preferences "Account" row in place (no sheet rebuild, so it can update
+// live when auth state resolves without disturbing anything else in the sheet).
+function fillAuthRow(row) {
+  if (!row) return;
+  row.replaceChildren();
+  const email = _fbUser && _fbUser.email;
+  if (email && AUTH_ALLOWED.includes(email)) {
+    row.appendChild(el("div", "setLabel", "✓ Signed in as " + email));
+    const out = el("button", "segBtn", "Sign out");
+    out.addEventListener("click", fbSignOut);
+    row.appendChild(out);
+  } else if (email) {
+    row.appendChild(el("div", "setLabel", "Signed in as " + email + " — not your authorized account"));
+    const out = el("button", "segBtn", "Sign out");
+    out.addEventListener("click", fbSignOut);
+    row.appendChild(out);
+  } else {
+    row.appendChild(el("div", "setLabel", "Sign in with Google"));
+    const inb = el("button", "segBtn on", "Sign in");
+    inb.addEventListener("click", fbSignIn);
+    row.appendChild(inb);
+  }
+}
+function renderAuthRow() { fillAuthRow(document.getElementById("authRow")); }
+// Kick off auth init after the app has painted so we can catch a returning
+// redirect and know the signed-in state — deferred + guarded so it never blocks.
+setTimeout(() => { fbLoad().catch(() => {}); }, 1200);
