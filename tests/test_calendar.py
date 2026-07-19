@@ -115,6 +115,30 @@ class Recurrence(unittest.TestCase):
         dates = [dt.datetime.fromtimestamp(e["start"], UTC).date().isoformat() for e in out]
         self.assertEqual(dates, ["2026-07-20", "2026-08-03"])  # skips 7/27
 
+    def test_monthly_recurrence_from_old_start(self):
+        # Series started years ago; the instance in this month's window must show.
+        ws, we = _win(days=10, base="2026-07-15T00:00:00")  # window covers 7/15..7/25
+        ics = _wrap("BEGIN:VEVENT\r\nSUMMARY:Monthly review\r\n"
+                    "DTSTART:20240120T170000Z\r\nRRULE:FREQ=MONTHLY\r\nEND:VEVENT")
+        out = cf.parse_ics(ics, ws, we)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(dt.datetime.fromtimestamp(out[0]["start"], UTC).date().isoformat(), "2026-07-20")
+
+    def test_yearly_recurrence_birthday(self):
+        ws, we = _win(days=6, base="2026-03-23T00:00:00")  # window covers 3/23..3/29
+        ics = _wrap("BEGIN:VEVENT\r\nSUMMARY:Birthday\r\n"
+                    "DTSTART;VALUE=DATE:20220325\r\nRRULE:FREQ=YEARLY\r\nEND:VEVENT")
+        out = cf.parse_ics(ics, ws, we)
+        self.assertEqual(len(out), 1)
+        self.assertTrue(out[0]["all_day"])
+        self.assertEqual(dt.datetime.fromtimestamp(out[0]["start"], UTC).date().isoformat(), "2026-03-25")
+
+    def test_yearly_outside_window_excluded(self):
+        ws, we = _win(days=6, base="2026-07-15T00:00:00")  # March birthday not near July
+        ics = _wrap("BEGIN:VEVENT\r\nSUMMARY:Birthday\r\n"
+                    "DTSTART;VALUE=DATE:20220325\r\nRRULE:FREQ=YEARLY\r\nEND:VEVENT")
+        self.assertEqual(cf.parse_ics(ics, ws, we), [])
+
 
 class OrderingAndLimit(unittest.TestCase):
     def test_events_sorted_by_start(self):

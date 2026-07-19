@@ -114,7 +114,7 @@ def _occurrences(ev, win_start, win_end):
         return [start] if win_start <= start <= win_end else []
 
     freq = rule["FREQ"]
-    if freq not in ("DAILY", "WEEKLY"):
+    if freq not in ("DAILY", "WEEKLY", "MONTHLY", "YEARLY"):
         return [start] if win_start <= start <= win_end else []
 
     interval = max(1, int(rule.get("INTERVAL") or "1"))
@@ -122,9 +122,19 @@ def _occurrences(ev, win_start, win_end):
     bydays = [_WEEKDAYS[d] for d in rule.get("BYDAY", "").split(",") if d in _WEEKDAYS]
     if freq == "WEEKLY" and not bydays:
         bydays = [start.weekday()]
+    monthday = start.day
+    if rule.get("BYMONTHDAY"):
+        try:
+            md = int(rule["BYMONTHDAY"].split(",")[0])
+            if md > 0:
+                monthday = md
+        except ValueError:
+            pass
 
     base_week = start.date() - dt.timedelta(days=start.weekday())
-    # Walk a day past each edge; the precise per-occurrence check does the filtering.
+    # Walk day-by-day across the (short) window — the walk starts at the window
+    # edge, not the series start, so an old recurring event stays cheap. The
+    # per-occurrence match below does the real filtering.
     day = max(start.date(), (win_start - dt.timedelta(days=1)).date())
     last = (win_end + dt.timedelta(days=1)).date()
     out = []
@@ -132,14 +142,21 @@ def _occurrences(ev, win_start, win_end):
     while day <= last and guard < 4000:
         guard += 1
         occ = dt.datetime.combine(day, start.timetz())  # keeps start's timezone
-        if occ >= start and win_start <= occ <= win_end and (not until or occ <= until):
+        if occ >= start and win_start <= occ <= win_end and (not until or occ <= until) and occ not in exdates:
+            match = False
             if freq == "DAILY":
-                if (day - start.date()).days % interval == 0 and occ not in exdates:
-                    out.append(occ)
-            else:  # WEEKLY
+                match = (day - start.date()).days % interval == 0
+            elif freq == "WEEKLY":
                 wk = (day - base_week).days // 7
-                if day.weekday() in bydays and wk % interval == 0 and occ not in exdates:
-                    out.append(occ)
+                match = day.weekday() in bydays and wk % interval == 0
+            elif freq == "MONTHLY":
+                mo = (day.year - start.year) * 12 + (day.month - start.month)
+                match = mo >= 0 and mo % interval == 0 and day.day == monthday
+            elif freq == "YEARLY":
+                yr = day.year - start.year
+                match = yr >= 0 and yr % interval == 0 and (day.month, day.day) == (start.month, start.day)
+            if match:
+                out.append(occ)
         day += dt.timedelta(days=1)
     return out
 
