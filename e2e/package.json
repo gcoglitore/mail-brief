@@ -1,0 +1,13 @@
+{
+  "name": "mail-brief-e2e",
+  "private": true,
+  "description": "Browser UI tests for the Mail Brief client (hermetic — mocks Firebase and the send API).",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "install-browser": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}
