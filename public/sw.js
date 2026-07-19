@@ -2,7 +2,7 @@
 // Mail data itself is cached by the page in localStorage; replies written
 // offline queue in the page's outbox. This worker only guarantees the app
 // opens with no connection.
-const CACHE = "mailbrief-shell-v5";
+const CACHE = "mailbrief-shell-v6";
 const SHELL = ["/", "/styles.css", "/app.js", "/manifest.json", "/icon-180.png"];
 
 self.addEventListener("install", e => {
