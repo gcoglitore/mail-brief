@@ -162,6 +162,33 @@ function svgEl(markup) {
   return document.importNode(new DOMParser().parseFromString(markup, "image/svg+xml").documentElement, true);
 }
 
+// Turn a plain string into a DocumentFragment where http(s)/www links become
+// clickable <a> elements. Stays XSS-safe: anchors are created with
+// createElement and only http/https URLs get an href (never javascript:), so no
+// HTML from the email/message is ever parsed. Plain text (incl. newlines) is
+// preserved as text nodes.
+function linkify(text) {
+  const frag = document.createDocumentFragment();
+  const s = (text == null ? "" : String(text));
+  // A URL, minus any trailing sentence punctuation so "see http://x.com." works.
+  const re = /\b(https?:\/\/|www\.)[^\s<>()]+[^\s<>().,;:!?'"]/gi;
+  let last = 0, m;
+  while ((m = re.exec(s))) {
+    if (m.index > last) frag.appendChild(document.createTextNode(s.slice(last, m.index)));
+    const url = m[0];
+    const a = document.createElement("a");
+    a.href = /^www\./i.test(url) ? "https://" + url : url;
+    a.textContent = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.className = "inlineLink";
+    frag.appendChild(a);
+    last = m.index + url.length;
+  }
+  if (last < s.length) frag.appendChild(document.createTextNode(s.slice(last)));
+  return frag;
+}
+
 function ago(ts) {
   const s = Math.max(1, Math.floor(Date.now() / 1000 - ts));
   if (s < 3600) return Math.floor(s / 60) + "m";
@@ -289,7 +316,7 @@ function openReader(i) {
   $("readerFrom").textContent = i.from_name || i.from_email || "?";
   $("readerAgo").textContent = ago(i.ts);
   $("readerSubject").textContent = i.subject || "(no subject)";
-  $("readerBody").textContent = i.body || "";
+  $("readerBody").replaceChildren(linkify(i.body || ""));
 
   // Why this is priority + a detected date, as chips
   const why = $("readerWhy"); why.replaceChildren();
@@ -1574,7 +1601,7 @@ function openThread(c) {
   (c.messages || []).forEach(m => {
     const b = el("div", "bub " + (m.is_me ? "me" : "them"));
     if (!m.is_me && c.group) b.appendChild(el("div", "bubName", m.sender || "?"));
-    b.appendChild(document.createTextNode(m.text || (m.kind && m.kind !== "TEXT" ? "[" + m.kind.toLowerCase() + "]" : "")));
+    b.appendChild(linkify(m.text || (m.kind && m.kind !== "TEXT" ? "[" + m.kind.toLowerCase() + "]" : "")));
     b.appendChild(el("div", "bubTime", m.ts ? ago(m.ts) + " ago" : ""));
     body.appendChild(b);
   });

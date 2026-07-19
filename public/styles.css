@@ -269,6 +269,11 @@
     position: sticky; top: 0; z-index: 3; background: var(--bg);
     padding: 12px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   .openLink { color: var(--blue); font-size: 13px; text-decoration: none; }
+  /* Clickable links inside email bodies and text/DM bubbles */
+  .inlineLink { color: var(--blue); text-decoration: underline; text-underline-offset: 2px;
+    overflow-wrap: anywhere; }
+  .inlineLink:hover { color: var(--gold); }
+  .bub.me .inlineLink { color: #0b1f45; }   /* readable on the gold "me" bubble */
   #readerDone { color: var(--green); border-color: var(--green); }
   #readerDraft { color: var(--gold); border-color: var(--gold); }
   #readerMore { display: none; }

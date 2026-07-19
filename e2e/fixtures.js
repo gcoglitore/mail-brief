@@ -23,7 +23,7 @@ function makeBrief() {
         from_email: "dana@vc.com",
         subject: "Term sheet — sign by Friday?",
         snippet: "Can you review and sign page 4 before the call?",
-        body: "Hi Gio,\n\nPlease review and sign page 4 of the attached term sheet before our call.\n\nThanks,\nDana",
+        body: "Hi Gio,\n\nPlease review and sign page 4 here: https://example.com/termsheet before our call.\n\nThanks,\nDana",
         ts: NOW - 3 * 86400,
         unread: true,
         bucket: "attention",
@@ -68,7 +68,7 @@ function makeMsgs() {
         unread: 2,
         messages: [
           { text: "running late?", ts: NOW - 1300, is_me: false },
-          { text: "see you at 6", ts: NOW - 1200, is_me: false },
+          { text: "map here www.example.com/spot see you at 6", ts: NOW - 1200, is_me: false },
         ],
       },
       {
