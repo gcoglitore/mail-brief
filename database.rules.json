@@ -5,10 +5,26 @@
     "briefs": {
       "$token": {
         ".read": true,
-        "subs": { ".write": true },
-        "msg_outbox": { ".write": true },
-        "flags": { ".write": true },
-        "settings": { ".write": true }
+        "subs": {
+          ".write": true,
+          "$sid": { ".validate": "!newData.exists() || newData.hasChildren()" }
+        },
+        "msg_outbox": {
+          ".write": true,
+          "$oid": {
+            ".validate": "!newData.exists() || (newData.hasChild('chatID') && newData.child('chatID').isString() && newData.child('chatID').val().length <= 512 && (!newData.hasChild('text') || (newData.child('text').isString() && newData.child('text').val().length <= 20000)) && (!newData.hasChild('action') || (newData.child('action').isString() && newData.child('action').val().length <= 32)))"
+          }
+        },
+        "flags": {
+          ".write": true,
+          "$fid": {
+            ".validate": "!newData.exists() || ((!newData.hasChild('pin') || newData.child('pin').isBoolean()) && (!newData.hasChild('snooze') || newData.child('snooze').isNumber()))"
+          }
+        },
+        "settings": {
+          ".write": true,
+          "group_threads": { ".validate": "newData.isBoolean()" }
+        }
       }
     }
   }

@@ -339,21 +339,38 @@ def main():
 
     sent = drain_outbox(key, btok, dbtok)
 
-    chats = build_beeper_chats(btok) + build_imessage_chats()
-    chats.sort(key=lambda c: c.get("ts", 0), reverse=True)
+    beeper_chats = build_beeper_chats(btok)
+    imsg_chats = build_imessage_chats()
+    chats = beeper_chats + imsg_chats
 
-    # Never wipe good data: if this run found nothing (e.g. no Full Disk Access,
-    # or Beeper/Messages momentarily unavailable), keep what's already published
-    # instead of overwriting it with an empty list.
-    if not chats:
+    # Preserve a source that produced NOTHING this run (e.g. launchd python without
+    # Full Disk Access → iMessage empty, or Beeper momentarily down) so one failing
+    # source can't wipe the OTHER source's already-published chats. Previously the
+    # guard only fired when BOTH were empty, so a partial failure silently wiped
+    # half the messages.
+    if not beeper_chats or not imsg_chats:
         try:
             existing = db_request(f"/briefs/{key}/messages.json", dbtok)
-            if existing and existing.get("chats"):
-                print(f"0 chats this run — keeping {len(existing['chats'])} already published (no overwrite)")
-                return
+            prev = (existing or {}).get("chats") or []
         except Exception:
-            pass
+            prev = []
+        IMSG = {"imessage", "sms"}
+        if not imsg_chats:
+            kept = [c for c in prev if c.get("network") in IMSG]
+            if kept:
+                chats += kept
+                print(f"iMessage empty this run — preserved {len(kept)} prior iMessage/SMS chats")
+        if not beeper_chats:
+            kept = [c for c in prev if c.get("network") not in IMSG]
+            if kept:
+                chats += kept
+                print(f"Beeper empty this run — preserved {len(kept)} prior DM chats")
 
+    if not chats:
+        print("0 chats this run and nothing to preserve — no overwrite")
+        return
+
+    chats.sort(key=lambda c: c.get("ts", 0), reverse=True)
     snap = {"generated_at": int(time.time()), "chats": chats,
             "counts": {"unread": sum(c.get("unread", 0) for c in chats), "chats": len(chats)}}
     db_request(f"/briefs/{key}/messages.json", dbtok, method="PUT", payload=snap)

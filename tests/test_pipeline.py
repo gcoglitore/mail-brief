@@ -162,5 +162,36 @@ class Attachments(unittest.TestCase):
         self.assertEqual(rm.extract_attachments(m), [])
 
 
+class ExtractTextEdges(unittest.TestCase):
+    def test_attachment_not_used_as_body(self):
+        m = email.message.EmailMessage()
+        m.set_content("<div>Real body here</div>", subtype="html")
+        m.add_attachment(b"ATTACHMENT TEXT should not be body",
+                         maintype="text", subtype="plain", filename="notes.txt")
+        out = rm.extract_text(m)
+        self.assertIn("Real body", out)
+        self.assertNotIn("should not be body", out)
+
+    def test_unknown_charset_keeps_body(self):
+        m = email.message.EmailMessage()
+        m.set_content("hello world")
+        m.set_param("charset", "x-unknown-charset")
+        self.assertIn("hello", rm.extract_text(m))
+
+
+class ThreadBucketEscalation(unittest.TestCase):
+    def test_thread_takes_most_important_bucket_not_latest(self):
+        msgs = [
+            {"msgid": "a", "thread_key": "t", "ts": 10, "unread": False, "bucket": "attention",
+             "from_name": "Bob", "snippet": "the real ask"},
+            {"msgid": "b", "thread_key": "t", "ts": 20, "unread": False, "bucket": "junk",
+             "from_name": "Auto", "snippet": "auto-reply footer"},
+        ]
+        out = rm.group_threads(msgs)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["msgid"], "b")          # rep is still the latest message
+        self.assertEqual(out[0]["bucket"], "attention")  # but bucket escalates, not junk
+
+
 if __name__ == "__main__":
     unittest.main()

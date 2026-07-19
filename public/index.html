@@ -573,6 +573,7 @@ let BRIEF = null;
 let FILTER = "ALL";
 let SEARCH = "";
 let VIEW = "priority";  // active top-level view: priority | mail | msg | dm
+let retryTimer = null;  // single pending offline-retry handle (never compound)
 let FLAGS = {};         // per-item pin/snooze state, synced to the DB across devices
 let PRIO_SORT = "grouped";   // grouped (by intent) | newest (flat chronological)
 let PRIO_FILTER = "active";  // active | snoozed
@@ -900,21 +901,25 @@ function archiveItem(i) {
   const doneMsg = localStorage.getItem("mailbrief_done_taught")
     ? "Archived" : "Archived — filed out of your inbox";
   try { localStorage.setItem("mailbrief_done_taught", "1"); } catch (_) {}
+  // Each archive owns an independent commit timer, so archiving another item
+  // (or a background success/failure toast) can never trigger or cancel this
+  // one's commit. Undo just cancels this timer.
+  let cancelled = false;
+  const timer = setTimeout(() => { if (!cancelled) commitArchive(i, idx); }, 6000);
   showToast(doneMsg, {
     state: "ok", ms: 6000,
     undo: () => {                       // nothing sent yet — just restore it
+      cancelled = true; clearTimeout(timer);
       BRIEF.items.splice(Math.min(idx, BRIEF.items.length), 0, i);
       RECENT_DONE.shift();
       cacheBrief(); render();
     },
-    onExpire: () => commitArchive(i, idx),
   });
 }
 
 async function commitArchive(i, idx) {
   if (!i.msgid) return;                  // demo/no-id items can't sync
   const key = localStorage.getItem("mailbrief_key");
-  showToast("Archiving…", { state: "send", ms: 8000 });
   let ok = false;
   try {
     const r = await fetch(API, {
@@ -924,9 +929,9 @@ async function commitArchive(i, idx) {
     const d = await r.json().catch(() => ({}));
     ok = r.ok && d.archived;
   } catch (e) { /* offline */ }
-  if (ok) {
-    showToast("Archived ✓", { state: "ok", ms: 1600 });
-  } else {
+  // Success is silent (the item's already gone); only surface a failure so a
+  // status toast never clobbers another item's live Undo.
+  if (!ok) {
     if (BRIEF && BRIEF.items && BRIEF.items.indexOf(i) < 0) {
       BRIEF.items.splice(Math.min(idx, BRIEF.items.length), 0, i);
       cacheBrief(); render();
@@ -953,21 +958,22 @@ function archiveAllAttention() {
   cacheBrief();
   closeReader();
   render();
+  let cancelled = false;
+  const timer = setTimeout(() => { if (!cancelled) commitArchiveAll(removed, positions); }, 6000);
   showToast("Archived " + removed.length, {
     state: "ok", ms: 6000,
     undo: () => {
+      cancelled = true; clearTimeout(timer);
       removed.forEach((i, n) => BRIEF.items.splice(Math.min(positions[n], BRIEF.items.length), 0, i));
       cacheBrief(); render();
     },
-    onExpire: () => commitArchiveAll(removed),
   });
 }
 
-async function commitArchiveAll(removed) {
+async function commitArchiveAll(removed, positions) {
   const key = localStorage.getItem("mailbrief_key");
   const byAccount = {};
   removed.forEach(i => { if (i.msgid) (byAccount[i.account] = byAccount[i.account] || []).push(i.msgid); });
-  showToast("Archiving " + removed.length + "…", { state: "send", ms: 8000 });
   const failed = [];
   for (const account of Object.keys(byAccount)) {
     try {
@@ -980,11 +986,16 @@ async function commitArchiveAll(removed) {
     } catch (e) { failed.push(...removed.filter(i => i.account === account && i.msgid)); }
   }
   if (failed.length) {
-    failed.forEach(i => { if (BRIEF && BRIEF.items && BRIEF.items.indexOf(i) < 0) BRIEF.items.push(i); });
+    // Restore failures at their original positions (not appended to the end).
+    failed.forEach(i => {
+      if (BRIEF && BRIEF.items && BRIEF.items.indexOf(i) < 0) {
+        const n = removed.indexOf(i);
+        const pos = n >= 0 && positions ? Math.min(positions[n], BRIEF.items.length) : BRIEF.items.length;
+        BRIEF.items.splice(pos, 0, i);
+      }
+    });
     cacheBrief(); render();
     showToast(failed.length + " couldn't be archived — back in your inbox", { state: "fail", ms: 5000 });
-  } else {
-    showToast("Archived " + removed.length + " ✓", { state: "ok", ms: 1600 });
   }
 }
 
@@ -994,10 +1005,10 @@ async function markAllRead() {
   const byAccount = {};
   let any = false;
   BRIEF.items.forEach(i => {
-    if (i.unread && i.msgid) {
-      i.unread = false; any = true;
-      (byAccount[i.account] = byAccount[i.account] || []).push(i.msgid);
-    } else if (i.unread) { i.unread = false; any = true; }
+    if (!i.unread) return;
+    if (FILTER !== "ALL" && i.account !== FILTER) return;  // only the account you're viewing
+    if (i.msgid) (byAccount[i.account] = byAccount[i.account] || []).push(i.msgid);
+    i.unread = false; any = true;
   });
   if (!any) { updateNetBar(undefined, "Nothing unread"); setTimeout(() => updateNetBar(), 3000); return; }
   try { localStorage.setItem("mailbrief_cache", JSON.stringify(BRIEF)); } catch (e) {}
@@ -1180,7 +1191,7 @@ function renderBriefStrip(attn) {
   const repliable = attn.filter(i => i.reply_to).length;
   const unread = attn.filter(i => i.unread).length;
   const oldest = attn.reduce((m, i) => Math.min(m, i.ts || Infinity), Infinity);
-  const overdue = oldest !== Infinity && (Date.now() / 1000 - oldest) > 172800; // >2 days
+  const overdue = oldest !== Infinity && (Date.now() / 1000 - oldest) > AGING_DAYS * 86400;
   const meetings = attn.filter(i => i.signals && i.signals.meeting).length;
   const docs = attn.filter(i => i.signals && i.signals.doc).length;
   const cells = [
@@ -1602,6 +1613,7 @@ function render() {
 }
 
 async function load(key, fromButton) {
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }  // supersede any pending retry
   let gotResponse = false, data = null;
   try {
     const r = await fetch(DB + "/briefs/" + encodeURIComponent(key) + "/brief.json");
@@ -1655,7 +1667,7 @@ async function load(key, fromButton) {
     $("app").style.display = "block";
     document.body.classList.add("signed-in");
     updateNetBar(undefined, "Connecting…");
-    setTimeout(() => load(key, false), 4000);
+    retryTimer = setTimeout(() => load(key, false), 4000);
     return;
   }
 
@@ -1736,7 +1748,7 @@ $("readerBack").addEventListener("click", closeReader);
 })();
 $("readerReply").addEventListener("click", () => { if (readerItem) openCompose(readerItem); });
 $("readerDraft").addEventListener("click", () => { if (readerItem) draftReply(readerItem); });
-$("readerSnooze").addEventListener("click", () => { if (readerItem) openRowMenu(readerItem, $("readerSnooze")); });
+$("readerSnooze").addEventListener("click", e => { e.stopPropagation(); if (readerItem) openRowMenu(readerItem, $("readerSnooze")); });
 $("readerPin").addEventListener("click", () => {
   if (!readerItem) return;
   const id = entryId(readerItem);
@@ -1940,6 +1952,7 @@ function markChatRead(c) {
   try { localStorage.setItem("mailbrief_msgs", JSON.stringify(MSGS)); } catch (_) {}
   renderMessages();   // drop the row's unread pill (list stays visible on desktop)
   updateMsgBadges();
+  if (VIEW === "priority") renderPriority();  // also clear it from the Priority rail
   const key = localStorage.getItem("mailbrief_key");
   if (!key || !c.id) return;
   fetch(DB + "/briefs/" + encodeURIComponent(key) + "/msg_outbox.json", {

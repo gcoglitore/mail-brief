@@ -20,6 +20,7 @@ let lastDispatch = 0; // in-memory fallback cooldown for update-now requests
 // problem never blocks a legitimate reply.
 const DB_URL = 'https://mail-brief-gio-default-rtdb.firebaseio.com';
 const SEND_LIMIT_PER_HOUR = 20;
+const DRAFT_LIMIT_PER_HOUR = 40;  // AI drafting hits a paid LLM — cap it too
 let _tok = { value: '', exp: 0 };
 let _sa = null;
 try { if (process.env.FIREBASE_SERVICE_ACCOUNT) _sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT); } catch (_) {}
@@ -62,24 +63,35 @@ async function dbReq(path, method, val) {
   return r.json();
 }
 
-// Enforce a rolling one-hour send cap across instances. Returns true if allowed
-// (and records this send); throws on any DB problem so the caller can fall back.
-async function durableRateOk() {
+// Count sends in the rolling one-hour window (read-only; prunes expired entries
+// opportunistically). Throws on any DB problem so the caller can fall back to
+// the in-memory limiter. Records are appended (recordSend) rather than rewritten,
+// so this only READS — the quota is consumed only after a send actually succeeds.
+async function durableCount(path) {
   const now = Date.now();
-  const cur = (await dbReq('/_server/sends.json', 'GET')) || {};
-  const kept = {};
-  Object.entries(cur).forEach(([k, t]) => { if (now - t < 3600000) kept[k] = t; });
-  if (Object.keys(kept).length >= SEND_LIMIT_PER_HOUR) return false;
-  kept['s' + now] = now;
-  await dbReq('/_server/sends.json', 'PUT', kept);
-  return true;
+  const cur = (await dbReq(path, 'GET')) || {};
+  const base = path.replace(/\.json$/, '');
+  let count = 0;
+  for (const [k, t] of Object.entries(cur)) {
+    const ts = (t && typeof t === 'object') ? t.ts : t;  // tolerate {ts} or bare number
+    if (now - ts < 3600000) count += 1;
+    else dbReq(base + '/' + k + '.json', 'DELETE').catch(() => {}); // prune, best-effort
+  }
+  return count;
 }
+// Append one use with a push key so concurrent writers never clobber each other.
+async function recordUse(path) {
+  await dbReq(path, 'POST', { ts: Date.now() });
+}
+const durableSendCount = () => durableCount('/_server/sends.json');
+const recordSend = () => recordUse('/_server/sends.json');
 
 // Idempotency: a stable id for a specific reply, so a client retry (e.g. the
-// offline outbox re-flushing) can't send the same email twice.
+// offline outbox re-flushing) can't send the same email twice. Hashes the FULL
+// body so two long replies that share a prefix aren't wrongly deduped.
 function idemId(account, to, inReplyTo, body) {
   return crypto.createHash('sha256')
-    .update([account, to, inReplyTo || '', String(body).slice(0, 4000)].join('|'))
+    .update([account, to, inReplyTo || '', String(body)].join('|'))
     .digest('hex').slice(0, 40);
 }
 async function alreadySent(id) {
@@ -126,6 +138,16 @@ async function findUids(client, isGmail, id) {
     } catch (_) { /* fall through to header search */ }
   }
   return (await client.search({ header: { 'message-id': id } }, { uid: true })) || [];
+}
+
+// Sanitize + cap client-supplied Message-IDs before they reach IMAP/Gmail search,
+// so whitespace/operators can't broaden the match (e.g. 'x OR in:inbox').
+function cleanMsgids(list) {
+  const ok = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~@-]+$/;
+  return (Array.isArray(list) ? list : [list])
+    .map(m => String(m || '').replace(/[<>]/g, '').trim())
+    .filter(id => id && ok.test(id))
+    .slice(0, 200);
 }
 
 // Gio's voice, for AI-drafted replies.
@@ -225,7 +247,10 @@ functions.http('sendReply', async (req, res) => {
   if (!keyOk(key)) return res.status(401).json({ error: 'bad key' });
 
   if (action === 'draft') {
+    try { if ((await durableCount('/_server/drafts.json')) >= DRAFT_LIMIT_PER_HOUR)
+      return res.status(429).json({ error: 'too many AI drafts this hour' }); } catch (_) { /* best-effort */ }
     const out = await draftReplies(req.body.kind, req.body.sender, subject, body, req.body.intent, req.body.tone);
+    if (!out.error) { try { await recordUse('/_server/drafts.json'); } catch (_) {} }
     return res.status(out.error ? 503 : 200).json(out.error ? out : { ok: true, options: out.options, missing: out.missing || [] });
   }
 
@@ -234,8 +259,7 @@ functions.http('sendReply', async (req, res) => {
     // the app marks them read in Gmail/Yahoo too. Best-effort and idempotent.
     const acct = findAccount(String(account || ''));
     if (!acct) return res.status(404).json({ error: 'account not connected' });
-    const ids = (action === 'markallread' ? (req.body.msgids || []) : [msgid])
-      .map(m => String(m || '').replace(/[<>]/g, '').trim()).filter(Boolean);
+    const ids = cleanMsgids(action === 'markallread' ? (req.body.msgids || []) : [msgid]);
     if (!ids.length) return res.status(400).json({ error: 'msgid(s) required' });
     const isGmail = /gmail/i.test(acct.imapHost);
     const client = new ImapFlow({
@@ -270,8 +294,7 @@ functions.http('sendReply', async (req, res) => {
     // Yahoo Archive) in a single connection. Reversible — nothing is deleted.
     const acct = findAccount(String(account || ''));
     if (!acct) return res.status(404).json({ error: 'account not connected' });
-    const ids = (action === 'archiveall' ? (req.body.msgids || []) : [msgid])
-      .map(m => String(m || '').replace(/[<>]/g, '').trim()).filter(Boolean);
+    const ids = cleanMsgids(action === 'archiveall' ? (req.body.msgids || []) : [msgid]);
     if (!ids.length) return res.status(400).json({ error: 'msgid(s) required' });
     const isGmail = /gmail/i.test(acct.imapHost);
     const client = new ImapFlow({
@@ -348,13 +371,10 @@ functions.http('sendReply', async (req, res) => {
   }
 
   const now = Date.now();
-  while (sentLog.length && now - sentLog[0] > 3600000) sentLog.shift();
-  let rateOk;
-  try { rateOk = await durableRateOk(); }
-  catch (_) { rateOk = sentLog.length < SEND_LIMIT_PER_HOUR; } // DB unavailable — in-memory fallback
-  if (!rateOk) return res.status(429).json({ error: 'too many sends this hour' });
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(to || ''))) {
+  // Validate BEFORE touching the quota, so malformed/duplicate requests can't
+  // consume the hourly send budget and lock out real replies.
+  const toStr = String(to || '');
+  if (/[\r\n]/.test(toStr) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toStr)) {
     return res.status(400).json({ error: 'bad recipient address' });
   }
   if (!body || String(body).length > 20000) {
@@ -366,9 +386,16 @@ functions.http('sendReply', async (req, res) => {
   }
 
   // Idempotency: if this exact reply was already accepted (e.g. a retry), don't
-  // send it a second time.
-  const idem = idemId(String(account || ''), String(to), inReplyTo, body);
+  // send it a second time — and don't spend a quota slot on it.
+  const idem = idemId(String(account || ''), toStr, inReplyTo, body);
   try { if (await alreadySent(idem)) return res.json({ ok: true, deduped: true }); } catch (_) { /* best-effort */ }
+
+  // Rate check is COUNT-ONLY here; the slot is recorded only after a real send.
+  while (sentLog.length && now - sentLog[0] > 3600000) sentLog.shift();
+  let overCap;
+  try { overCap = (await durableSendCount()) >= SEND_LIMIT_PER_HOUR; }
+  catch (_) { overCap = sentLog.length >= SEND_LIMIT_PER_HOUR; } // DB unavailable — in-memory fallback
+  if (overCap) return res.status(429).json({ error: 'too many sends this hour' });
 
   const transporter = nodemailer.createTransport({
     host: acct.smtpHost,
@@ -379,7 +406,7 @@ functions.http('sendReply', async (req, res) => {
 
   const msg = {
     from: acct.email,
-    to: String(to),
+    to: toStr,
     subject: String(subject || '').slice(0, 300),
     text: String(body),
   };
@@ -392,7 +419,7 @@ functions.http('sendReply', async (req, res) => {
   try {
     await transporter.sendMail(msg);
     sentLog.push(now);
-    try { await recordSent(idem); } catch (_) { /* best-effort */ }
+    try { await recordSend(); await recordSent(idem); } catch (_) { /* best-effort */ }
     res.json({ ok: true });
   } catch (e) {
     res.status(502).json({ error: 'send failed: ' + ((e && e.message) || 'unknown') });

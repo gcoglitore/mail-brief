@@ -103,7 +103,7 @@ _REPLY_MARKERS = [
     re.compile(r"^\s*On\b.{0,200}\bwrote:\s*$", re.M),          # Gmail/Apple reply
     re.compile(r"^\s*-{2,}\s*Original Message\s*-{2,}", re.M | re.I),  # Outlook
     re.compile(r"^\s*_{5,}\s*$", re.M),                          # Outlook web divider
-    re.compile(r"^\s*From:\s.+\bSent:\s", re.M | re.S),          # forwarded header block
+    re.compile(r"^\s*From:\s.+\n\s*Sent:\s", re.M),             # Outlook forwarded header block (From line then Sent line)
     re.compile(r"^\s*-{2}\s*$", re.M),                           # standard signature "-- "
     re.compile(r"^\s*Sent from my \w+", re.M | re.I),
     re.compile(r"^\s*Get Outlook for \w+", re.M | re.I),
@@ -127,23 +127,29 @@ def strip_reply_chrome(text):
 def extract_text(msg):
     """Extract readable plain text (paragraphs preserved, quotes/signatures
     stripped) from a message, preferring text/plain then text/html."""
+    def is_body(p):  # a body part, not a file attachment
+        return not p.get_filename() and p.get_content_disposition() != "attachment"
     part = msg
     if msg.is_multipart():
         part = None
         for p in msg.walk():
-            if p.get_content_type() == "text/plain":
+            if p.get_content_type() == "text/plain" and is_body(p):
                 part = p
                 break
         if part is None:
             for p in msg.walk():
-                if p.get_content_type() == "text/html":
+                if p.get_content_type() == "text/html" and is_body(p):
                     part = p
                     break
     if part is None:
         return ""
     try:
         payload = part.get_payload(decode=True) or b""
-        text = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+        charset = part.get_content_charset() or "utf-8"
+        try:
+            text = payload.decode(charset, errors="replace")
+        except LookupError:  # unknown/invalid charset name — don't lose the body
+            text = payload.decode("utf-8", errors="replace")
     except Exception:
         return ""
     if part.get_content_type() == "text/html":
@@ -306,6 +312,11 @@ def group_threads(msgs):
         rep = group[-1]
         rep.pop("thread_key", None)
         rep["unread"] = any(m.get("unread") for m in group)
+        # Escalate to the most important bucket in the thread so an auto-reply or
+        # unsubscribe footer as the latest message can't bury an attention thread.
+        rank = {"attention": 2, "fyi": 1, "junk": 0}
+        best = max(group, key=lambda m: rank.get(m.get("bucket"), 0))
+        rep["bucket"] = best.get("bucket", rep.get("bucket"))
         if len(group) > 1:
             rep["thread"] = [
                 {"from": m.get("from_name", ""), "ts": m.get("ts", 0),
@@ -341,7 +352,10 @@ def fetch_account(label, addr, host, password, group=True):
                     flags += part.decode(errors="replace")
             msg = email.message_from_bytes(raw)
             from_name, from_email = email.utils.parseaddr(decode_header(msg.get("From")))
-            date_ts = email.utils.parsedate_to_datetime(msg.get("Date")).timestamp() if msg.get("Date") else time.time()
+            try:  # a malformed Date header must not drop the whole message
+                date_ts = email.utils.parsedate_to_datetime(msg.get("Date")).timestamp() if msg.get("Date") else time.time()
+            except Exception:
+                date_ts = time.time()
             msgid = (msg.get("Message-ID") or "").strip("<> ")
             if "gmail" in host:
                 link = f"https://mail.google.com/mail/u/{addr}/#search/rfc822msgid%3A{urllib.parse.quote(msgid)}"
@@ -395,17 +409,6 @@ def db_get(path, token):
     req = urllib.request.Request(DB_URL + path, headers={"Authorization": "Bearer " + token})
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read() or b"null")
-
-
-def previous_attention_ids(key, token):
-    """IDs of attention items from the last published brief, or None on first run."""
-    try:
-        prev = db_get(f"/briefs/{key}/brief.json", token)
-        if not prev:
-            return None
-        return {item_id(i) for i in prev.get("items", []) if i.get("bucket") == "attention"}
-    except Exception:
-        return None
 
 
 def notify_subscribers(new_items, key, token, unread=None):
@@ -476,7 +479,12 @@ def main():
     for n in range(1, 9):
         raw = os.environ.get(f"MAIL_ACCOUNT_{n}")
         if raw and raw.count("|") == 3:
-            accounts.append(raw.split("|", 3))
+            label, addr, host, password = raw.split("|", 3)
+            # Normalize label/addr/host once so the failed-account data-loss guard
+            # (which matches statuses' label against items' account) can't be
+            # disarmed by stray whitespace. Password is left as-is (spaces stripped
+            # later in fetch_account for app passwords).
+            accounts.append([label.strip(), addr.strip(), host.strip(), password])
     if not accounts:
         print("No MAIL_ACCOUNT_N secrets configured — nothing to do.")
         sys.exit(0)
@@ -547,7 +555,7 @@ def main():
         "generated_at": int(time.time()),
         "accounts": statuses,
         "items": all_items,
-        "counts": {b: sum(1 for i in all_items if i["bucket"] == b)
+        "counts": {b: sum(1 for i in all_items if i["bucket"] == b and not i.get("stale"))
                    for b in ("attention", "fyi", "junk")},
     }
 
@@ -569,7 +577,7 @@ def main():
         new_attention = [i for i in all_items
                          if i["bucket"] == "attention" and item_id(i) not in prev_ids]
         if new_attention:
-            unread_total = sum(1 for i in all_items if i.get("unread"))
+            unread_total = sum(1 for i in all_items if i.get("unread") and not i.get("stale"))
             notify_subscribers(new_attention, key, token, unread=unread_total)
 
 
