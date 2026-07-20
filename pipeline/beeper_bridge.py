@@ -40,6 +40,12 @@ LOOKBACK_DAYS = 30
 MAX_CHATS = 40
 MSGS_PER_CHAT = 15
 APPLE_EPOCH = 978307200  # 2001-01-01 in unix time
+# Networks you expect to always have recent DMs. If one is absent from a batch,
+# the bridge says so — a single logged-out connector (Slack, Signal, …) is then
+# obvious in the log instead of silently producing zero chats for that network.
+# Override with MAILBRIEF_EXPECTED_NETWORKS="slack,signal,whatsapp".
+EXPECTED_NETWORKS = [n.strip().lower() for n in
+                     os.environ.get("MAILBRIEF_EXPECTED_NETWORKS", "slack,signal").split(",") if n.strip()]
 
 
 # ---------- Beeper ----------
@@ -117,9 +123,12 @@ def build_beeper_chats(token):
     print(f"Beeper: {total} chats returned, {len(chats)} active"
           + (f" ({dropped} archived)" if dropped else "")
           + f", keeping top {len(kept)} — {breakdown}")
-    if "slack" not in "".join(by_net):
-        print("  note: no Slack chats in this batch — check that Slack is connected in Beeper "
-              "and has recent activity (only the 40 most-recently-active chats are kept).")
+    present = "".join(by_net)
+    for net in EXPECTED_NETWORKS:
+        if net not in present:
+            print(f"  note: no {net.capitalize()} chats in this batch — check that {net.capitalize()} "
+                  f"is connected in Beeper and has recent activity (only the {MAX_CHATS} "
+                  "most-recently-active chats are kept).")
     out = []
     for c in kept:
         cid = c.get("id")
