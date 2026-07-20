@@ -95,16 +95,33 @@ def iso_epoch(ts):
 
 def build_beeper_chats(token):
     if not token:
+        print("Beeper token missing — set BEEPER_ACCESS_TOKEN or create ~/.beeper-token. "
+              "No Slack/Signal/WhatsApp DMs will be fetched.")
         return []
     try:
         chats = items_of(beeper_get(f"/v1/chats?limit={MAX_CHATS * 2}", token))
     except Exception as exc:
-        print(f"Beeper unavailable: {exc}")
+        print(f"Beeper unavailable (is the Beeper Desktop app running on {BEEPER}?): {exc}")
         return []
+    total = len(chats)
     chats = [c for c in chats if not c.get("isArchived")]
     chats.sort(key=lambda c: iso_epoch(c.get("lastActivity")), reverse=True)
+    kept = chats[:MAX_CHATS]
+    # Per-network visibility so a missing bridge (e.g. Slack logged out in Beeper)
+    # is obvious in the log instead of silently producing zero chats.
+    by_net = {}
+    for c in kept:
+        by_net[(c.get("network") or "?").lower()] = by_net.get((c.get("network") or "?").lower(), 0) + 1
+    breakdown = ", ".join(f"{n} {net}" for net, n in sorted(by_net.items())) or "none"
+    dropped = total - len(chats)
+    print(f"Beeper: {total} chats returned, {len(chats)} active"
+          + (f" ({dropped} archived)" if dropped else "")
+          + f", keeping top {len(kept)} — {breakdown}")
+    if "slack" not in "".join(by_net):
+        print("  note: no Slack chats in this batch — check that Slack is connected in Beeper "
+              "and has recent activity (only the 40 most-recently-active chats are kept).")
     out = []
-    for c in chats[:MAX_CHATS]:
+    for c in kept:
         cid = c.get("id")
         if not cid:
             continue
@@ -374,8 +391,13 @@ def main():
     snap = {"generated_at": int(time.time()), "chats": chats,
             "counts": {"unread": sum(c.get("unread", 0) for c in chats), "chats": len(chats)}}
     db_request(f"/briefs/{key}/messages.json", dbtok, method="PUT", payload=snap)
-    n_imsg = sum(1 for c in chats if c.get("network") == "imessage")
-    print(f"published {len(chats)} chats ({n_imsg} iMessage); sent {sent} queued reply(s)")
+    net_counts = {}
+    for c in chats:
+        net = (c.get("network") or "?").lower()
+        net = "imessage" if net in ("imessage", "sms") else net
+        net_counts[net] = net_counts.get(net, 0) + 1
+    breakdown = ", ".join(f"{n} {net}" for net, n in sorted(net_counts.items())) or "none"
+    print(f"published {len(chats)} chats ({breakdown}); sent {sent} queued reply(s)")
 
 
 if __name__ == "__main__":
