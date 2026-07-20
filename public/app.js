@@ -1515,6 +1515,20 @@ function updateMsgBadges() {
 function renderMessages() {
   const v = $("msgView");
   v.replaceChildren();
+  // Messages come from the Mac's Beeper bridge (~every 5 min while the Mac is on).
+  // If the snapshot goes quiet for more than an hour the connector is likely offline
+  // (Mac asleep / traveling), so DMs are stale — say so instead of showing nothing.
+  const gen = (MSGS && MSGS.generated_at) || 0;
+  const stale = gen && (Math.floor(Date.now() / 1000 - gen) > 3600);
+  if (stale) {
+    const banner = el("div", "msgStale");
+    banner.style.cssText = "margin:8px 0;padding:10px 12px;border-radius:8px;font-size:13px;" +
+      "line-height:1.4;text-align:left;background:rgba(212,160,23,.12);" +
+      "border:1px solid rgba(212,160,23,.35);color:var(--gold,#d4a017)";
+    banner.textContent = "Messages last synced " + ago(gen) + " ago — your Mac connector looks " +
+      "offline. DMs (Slack, Signal, WhatsApp) only refresh while your Mac is on.";
+    v.appendChild(banner);
+  }
   let chats = (MSGS && MSGS.chats) || [];
   chats = chats.filter(c => msgCategory(c.network) === MSGVIEW);
   if (SEARCH) {
