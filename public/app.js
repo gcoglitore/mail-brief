@@ -3,11 +3,13 @@
 // no HTML string assembly anywhere.
 const DB = "https://mail-brief-gio-default-rtdb.firebaseio.com";
 let BRIEF = null;
+let NEWS = [];
 let FILTER = "ALL";
 let SEARCH = "";
 let VIEW = "priority";  // active top-level view: priority | mail | msg | dm
 let retryTimer = null;  // single pending offline-retry handle (never compound)
 let FLAGS = {};         // per-item pin/snooze state, synced to the DB across devices
+const BREAKING_EXPANDED = new Set();
 let PRIO_SORT = "grouped";   // grouped (by intent) | newest (flat chronological)
 let PRIO_FILTER = "active";  // active | snoozed
 let AGING_DAYS = 2;          // an item older than this reads as overdue
@@ -69,6 +71,10 @@ let _settingsTrigger = null, _composeTrigger = null;
 
 function openSettings(reopen) {
   const sheet = $("settingsSheet");
+  // These controls live off-canvas between settings visits; keep their existing
+  // event listeners while moving them into the freshly rendered sheet.
+  const alertControl = $("alertBtn");
+  const lockControl = $("lockBtn");
   // On a re-render (a toggle was flipped) keep the keyboard user's place.
   const prevIdx = reopen ? focusables(sheet).indexOf(document.activeElement) : -1;
   sheet.replaceChildren();
@@ -78,8 +84,11 @@ function openSettings(reopen) {
     const row = el("div", "setRow");
     row.appendChild(el("div", "setLabel", label));
     const s = el("div", "segToggle");
+    s.setAttribute("role", "group");
+    s.setAttribute("aria-label", label);
     opts.forEach(([val, lbl]) => {
       const b = el("button", "segBtn" + (cur === val ? " on" : ""), lbl);
+      b.setAttribute("aria-pressed", String(cur === val));
       b.addEventListener("click", () => { set(val); change(); });
       s.appendChild(b);
     });
@@ -91,12 +100,13 @@ function openSettings(reopen) {
     row.appendChild(el("div", "setLabel", label));
     const b = el("button", "setSwitch" + (cur ? " on" : ""));
     b.setAttribute("role", "switch"); b.setAttribute("aria-checked", String(cur));
+    b.setAttribute("aria-label", label);
     b.appendChild(el("span", "knob"));
     b.addEventListener("click", () => { set(!cur); change(); });
     row.appendChild(b);
     sheet.appendChild(row);
   };
-  seg("Default Priority sort", [["grouped", "Grouped"], ["newest", "Newest"]], PREFS.sort,
+  seg("Default Priority sort", [["grouped", "By action"], ["newest", "Newest"]], PREFS.sort,
     v => { PREFS.sort = v; PRIO_SORT = v; });
   seg("Row density", [["comfortable", "Comfortable"], ["compact", "Compact"]], PREFS.density,
     v => { PREFS.density = v; });
@@ -109,12 +119,25 @@ function openSettings(reopen) {
   toggle("Show FYI section", PREFS.showFyi, v => { PREFS.showFyi = v; });
   sheet.appendChild(el("div", "setGroup", "EMAIL"));
   toggle("Group into conversations", PREFS.groupThreads, v => { PREFS.groupThreads = v; writeGroupThreads(v); });
+  if (ALERTS_SUPPORTED && alertControl) {
+    sheet.appendChild(el("div", "setGroup", "NOTIFICATIONS"));
+    const alertRow = el("div", "setRow");
+    alertRow.appendChild(el("div", "setLabel", "Priority and breaking alerts"));
+    alertRow.appendChild(alertControl);
+    sheet.appendChild(alertRow);
+  }
   // Firebase Auth (Stage 1: additive — signing in does NOT yet change how your
   // mail loads; your access key stays in charge. This just proves sign-in works.)
   sheet.appendChild(el("div", "setGroup", "ACCOUNT (BETA)"));
   const authRow = el("div", "setRow"); authRow.id = "authRow";
   fillAuthRow(authRow);
   sheet.appendChild(authRow);
+  if (lockControl) {
+    const deviceRow = el("div", "setRow");
+    deviceRow.appendChild(el("div", "setLabel", "Saved access on this device"));
+    deviceRow.appendChild(lockControl);
+    sheet.appendChild(deviceRow);
+  }
   const done = el("button", "setClose", "Done");
   done.addEventListener("click", closeSettings);
   sheet.appendChild(done);
@@ -196,6 +219,14 @@ function ago(ts) {
   return Math.floor(s / 86400) + "d";
 }
 
+function alertAge(ts) {
+  if (!ts) return "";
+  const s = Math.max(1, Math.floor(Date.now() / 1000 - ts));
+  if (s < 3600) return Math.floor(s / 60) + " min ago";
+  if (s < 86400) return Math.floor(s / 3600) + " hr ago";
+  return Math.floor(s / 86400) + "d ago";
+}
+
 function safeLink(url) {
   return typeof url === "string" && url.startsWith("https://") ? url : null;
 }
@@ -203,12 +234,21 @@ function safeLink(url) {
 function card(i, cls) {
   const link = safeLink(i.link);
   const hasBody = !!i.body;
-  // Cards with full text are tap-to-expand containers; others link straight out.
-  const node = el(hasBody || !link ? "div" : "a", "card" + (cls ? " " + cls : ""));
+  // Keep row actions outside the primary open target. This avoids nested
+  // interactive controls and makes each email reachable from the keyboard.
+  const node = el("article", "card" + (cls ? " " + cls : ""));
+  const opener = el(hasBody ? "button" : (link ? "a" : "div"), "cardOpen");
+  if (hasBody) {
+    opener.type = "button";
+    opener.setAttribute("aria-label", "Open " + (i.subject || "email") + " from " +
+      (i.from_name || i.from_email || "sender"));
+    opener.addEventListener("click", () => openReader(i));
+  }
   if (!hasBody && link) {
-    node.href = link; node.target = "_blank"; node.rel = "noopener";
+    opener.href = link; opener.target = "_blank"; opener.rel = "noopener";
+    opener.setAttribute("aria-label", "Open " + (i.subject || "email") + " in mailbox");
     // Opening it in Gmail/Yahoo counts as reading it — sync the read state.
-    node.addEventListener("click", () => markRead(i));
+    opener.addEventListener("click", () => markRead(i));
   }
 
   const id = entryId(i);
@@ -225,21 +265,14 @@ function card(i, cls) {
   meta.appendChild(el("span", "cTime", ago(i.ts)));
   if (i.bucket !== "junk" && isOverdue(i.ts)) { const o = el("span", "overduePill", "OVERDUE"); o.title = "Older than " + AGING_DAYS + " days"; meta.appendChild(o); }
   if (i.stale) { const s = el("span", "stalePill", "STALE"); s.title = "This account didn't refresh last time — showing your last known mail."; meta.appendChild(s); }
-  node.appendChild(meta);
+  opener.appendChild(meta);
 
   // Primary line — the requested action, dominant (gold when AI-summarized)
-  node.appendChild(el("div", "cPrimary" + (i.action_summary ? " act" : ""), i.action_summary || i.subject || "(no subject)"));
+  opener.appendChild(el("div", "cPrimary" + (i.action_summary ? " act" : ""), i.action_summary || i.subject || "(no subject)"));
   // Secondary line — quieter context (subject, or snippet when no summary)
   const secondary = i.action_summary ? (i.subject || "") : (i.snippet || "");
-  if (secondary) node.appendChild(el("div", "cSecondary", secondary));
-
-  if (hasBody) {
-    node.style.cursor = "pointer";
-    node.addEventListener("click", e => {
-      if (e.target.closest("a") || e.target.closest("button")) return;
-      openReader(i);
-    });
-  }
+  if (secondary) opener.appendChild(el("div", "cSecondary", secondary));
+  node.appendChild(opener);
 
   if (i.bucket !== "junk") {
     const foot = el("div", "cardFoot");
@@ -746,14 +779,149 @@ function renderBriefStrip(attn) {
   if (docs) cells.push({ n: docs, label: docs === 1 ? "doc to action" : "docs to action", tone: "gold" });
   if (!meetings && !docs) cells.push({ n: unread, label: "unread", tone: "blue" });
   if (oldest !== Infinity) cells.push({ n: ago(oldest), label: "oldest waiting", tone: overdue ? "red" : "gray" });
-  // One-line summary (shown on mobile instead of the stat cells).
-  strip.appendChild(el("div", "briefLine", cells.map(c => c.n + " " + c.label).join("  ·  ")));
+  // Keep the phone summary to the three decisions that matter most; the richer
+  // stat cells remain available on larger screens.
+  const mobileSummary = [
+    attn.length + " priority",
+    repliable + (repliable === 1 ? " reply" : " replies"),
+  ];
+  if (oldest !== Infinity) mobileSummary.push("oldest " + ago(oldest));
+  strip.appendChild(el("div", "briefLine", mobileSummary.join("  ·  ")));
   cells.forEach(c => {
     const cell = el("div", "statCell tone-" + c.tone);
     cell.appendChild(el("div", "statN", String(c.n)));
     cell.appendChild(el("div", "statL", c.label));
     strip.appendChild(cell);
   });
+}
+
+function normalizeBreakingNews(data) {
+  const rows = Array.isArray(data)
+    ? data
+    : (data && typeof data === "object"
+      ? Object.keys(data).map(id => Object.assign({ id }, data[id]))
+      : []);
+  return rows.filter(n => n && n.headline && n.summary).sort((a, b) =>
+    (b.published_at || b.updated_at || 0) - (a.published_at || a.updated_at || 0));
+}
+
+async function loadBreakingNews(key) {
+  let fresh = null;
+  try {
+    const r = await fetch(DB + "/briefs/" + encodeURIComponent(key) + "/news.json");
+    if (r.ok) fresh = await r.json();
+  } catch (_) { /* use the last on-device copy below */ }
+  if (fresh !== null) {
+    NEWS = normalizeBreakingNews(fresh);
+    try { localStorage.setItem("mailbrief_news_cache", JSON.stringify(NEWS)); } catch (_) {}
+    return;
+  }
+  try { NEWS = normalizeBreakingNews(JSON.parse(localStorage.getItem("mailbrief_news_cache") || "[]")); }
+  catch (_) { NEWS = []; }
+}
+
+function mutedBreakingIds() {
+  try { return new Set(JSON.parse(localStorage.getItem("mailbrief_muted_news") || "[]")); }
+  catch (_) { return new Set(); }
+}
+
+function setMutedBreakingIds(ids) {
+  try { localStorage.setItem("mailbrief_muted_news", JSON.stringify([...ids])); } catch (_) {}
+}
+
+function breakingId(story) {
+  return String(story.id || story.url || story.headline);
+}
+
+function muteBreakingStory(story) {
+  const id = breakingId(story);
+  const muted = mutedBreakingIds();
+  muted.add(id);
+  setMutedBreakingIds(muted);
+  BREAKING_EXPANDED.delete(id);
+  renderBreakingNews();
+  showToast("Story muted", {
+    state: "ok",
+    ms: 6000,
+    undo: () => {
+      const restored = mutedBreakingIds();
+      restored.delete(id);
+      setMutedBreakingIds(restored);
+      renderBreakingNews();
+    },
+  });
+}
+
+// Breaking-news alerts are deliberately separate from the mail refresh payload
+// (/news.json vs /brief.json), so refreshing inboxes cannot erase an alert.
+// Only the newest unmuted, unexpired story is shown to keep this surface rare.
+function renderBreakingNews() {
+  const host = $("breakingNews");
+  host.replaceChildren();
+  const now = Date.now() / 1000;
+  const muted = mutedBreakingIds();
+  const story = NEWS.find(n => !muted.has(breakingId(n)) && (!n.expires_at || n.expires_at > now));
+  if (VIEW !== "priority" || SEARCH || PRIO_FILTER !== "active" || !story) {
+    host.classList.add("hidden");
+    return;
+  }
+
+  host.classList.remove("hidden");
+  const id = breakingId(story);
+  const article = el("article", "breakingAlert");
+  const kicker = el("div", "breakingKicker");
+  kicker.appendChild(el("span", "breakingPulse"));
+  kicker.appendChild(document.createTextNode("BREAKING · " + String(story.category || "News").toUpperCase()));
+  article.appendChild(kicker);
+
+  const headline = el("h2", "breakingHeadline", story.headline);
+  headline.id = "breakingHeadline";
+  article.setAttribute("aria-labelledby", headline.id);
+  article.appendChild(headline);
+  article.appendChild(el("p", "breakingSummary", story.summary));
+
+  const source = String(story.source || "Multiple sources");
+  const other = Math.max(0, Number(story.other_sources) || 0);
+  const sourceLine = source + (other ? " and " + other + " other source" + (other === 1 ? "" : "s") : "");
+  const age = story.age_label || alertAge(story.updated_at || story.published_at);
+  article.appendChild(el("div", "breakingMeta", sourceLine + (age ? " · Updated " + age : "")));
+
+  const details = el("div", "breakingDetails");
+  details.id = "breakingDetails";
+  details.hidden = !BREAKING_EXPANDED.has(id);
+  details.appendChild(el("div", "breakingDetailsLabel", "THE 1-MINUTE SUMMARY"));
+  details.appendChild(el("p", null, story.details || story.summary));
+  const coverage = safeLink(story.url);
+  if (coverage) {
+    const link = el("a", "breakingCoverage", "Open full coverage ↗");
+    link.href = coverage;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    details.appendChild(link);
+  }
+  article.appendChild(details);
+
+  const actions = el("div", "breakingActions");
+  const read = el("button", "breakingRead",
+    BREAKING_EXPANDED.has(id) ? "Hide summary" : "Read summary");
+  read.type = "button";
+  read.setAttribute("aria-expanded", String(BREAKING_EXPANDED.has(id)));
+  read.setAttribute("aria-controls", details.id);
+  read.addEventListener("click", () => {
+    if (BREAKING_EXPANDED.has(id)) BREAKING_EXPANDED.delete(id);
+    else BREAKING_EXPANDED.add(id);
+    renderBreakingNews();
+    const next = host.querySelector(".breakingRead");
+    if (next) next.focus();
+  });
+  actions.appendChild(read);
+
+  const mute = el("button", "breakingMute", "Mute this story");
+  mute.type = "button";
+  mute.addEventListener("click", () => muteBreakingStory(story));
+  actions.appendChild(mute);
+  article.appendChild(actions);
+  host.appendChild(article);
 }
 
 function greeting() {
@@ -1032,7 +1200,8 @@ function eventDayLabel(ts) {
 // A compact "what's on" agenda grouped by day, with the in-progress event marked.
 function renderAgenda(parent) {
   const events = (BRIEF && Array.isArray(BRIEF.calendar) ? BRIEF.calendar : [])
-    .filter(e => e && e.start);
+    .filter(e => e && e.start)
+    .sort((a, b) => a.start - b.start);
   if (!events.length) return;
   const now = Date.now() / 1000;
   const wrap = el("div", "agenda");
@@ -1068,6 +1237,7 @@ function renderPriority() {
   });
   const active = base.filter(e => !isSnoozed(e.id));
   const snoozed = base.filter(e => isSnoozed(e.id));
+  renderBreakingNews();
   renderBriefStrip(SEARCH ? [] : active.filter(e => e.kind === "mail").map(e => e.item));
   setBadge("prioBadge", active.length);
 
@@ -1075,8 +1245,11 @@ function renderPriority() {
   const tools = el("div", "prioTools");
   if (PRIO_FILTER === "active") {
     const seg = el("div", "segToggle");
-    [["grouped", "Grouped"], ["newest", "Newest"]].forEach(([m, lbl]) => {
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "Sort Priority");
+    [["grouped", "By action"], ["newest", "Newest"]].forEach(([m, lbl]) => {
       const b = el("button", "segBtn" + (PRIO_SORT === m ? " on" : ""), lbl);
+      b.setAttribute("aria-pressed", String(PRIO_SORT === m));
       b.addEventListener("click", () => { PRIO_SORT = m; PREFS.sort = m; savePrefs(); renderPriority(); });
       seg.appendChild(b);
     });
@@ -1095,12 +1268,20 @@ function renderPriority() {
     return;
   }
 
-  if (!SEARCH) renderAgenda(v);   // Google Calendar agenda sits atop the rail
-
   let entries = SEARCH ? active.filter(entryMatchesSearch) : active;
   if (!entries.length) {
-    v.appendChild(el("div", "empty", SEARCH ? "No matching priority items."
-      : "You're all caught up — nothing needs your attention."));
+    const empty = el("div", "emptyState");
+    empty.appendChild(el("div", "emptyTitle", SEARCH ? "No priority matches" : "You're all caught up"));
+    empty.appendChild(el("div", "emptyCopy", SEARCH
+      ? "Try another word or clear the search to see everything."
+      : "Nothing needs your attention right now."));
+    if (SEARCH) {
+      const clear = el("button", "emptyAction", "Clear search");
+      clear.addEventListener("click", clearSearch);
+      empty.appendChild(clear);
+    }
+    v.appendChild(empty);
+    if (!SEARCH) renderAgenda(v);
     return;
   }
   if (PRIO_SORT === "newest") {
@@ -1119,26 +1300,31 @@ function renderPriority() {
       inG.forEach(e => v.appendChild(rowFor(e)));
     });
   }
+  if (!SEARCH) renderAgenda(v);   // Calendar is useful context, after inbox actions.
 }
 
 function priorityMsgRow(c) {
   const id = entryId(c);
-  const row = el("div", "chat" + (isPinned(id) ? " pinned" : ""));
-  row.appendChild(el("span", "net " + netClass(c.network), netLabel(c.network)));
+  const row = el("article", "chat" + (isPinned(id) ? " pinned" : ""));
+  const open = el("button", "chatOpen");
+  open.type = "button";
+  open.setAttribute("aria-label", "Open conversation with " + (c.title || "unknown contact"));
+  open.appendChild(el("span", "net " + netClass(c.network), netLabel(c.network)));
   const mid = el("div", "chatMid");
   const title = el("div", "chatTitle", c.title || "(no title)");
   if (isPinned(id)) { const p = el("span", "pinMark"); p.appendChild(svgEl(IC_PIN)); title.prepend(p); }
   mid.appendChild(title);
   mid.appendChild(el("div", "chatPrev", c.preview || ""));
-  row.appendChild(mid);
+  open.appendChild(mid);
   const right = el("div", "chatRight");
   right.appendChild(el("div", "chatAgo", c.ts ? ago(c.ts) : ""));
   if (isOverdue(c.ts)) right.appendChild(el("div", "overduePill", "OVERDUE"));
   if (c.unread > 0) right.appendChild(el("div", "chatUnread", String(c.unread)));
+  open.appendChild(right);
+  open.addEventListener("click", () => openThread(c));
+  row.appendChild(open);
   const more = moreBtn(c);
-  if (more) right.appendChild(more);
-  row.appendChild(right);
-  row.addEventListener("click", () => openThread(c));
+  if (more) row.appendChild(more);
   return row;
 }
 
@@ -1231,7 +1417,10 @@ async function load(key, fromButton) {
     document.body.classList.add("signed-in");
     loadPrefs();         // device preferences (sort/aging/density/channels/fyi)
     loadServerSettings();// account-wide settings (thread grouping)
-    await loadFlags();   // pins/snoozes before first paint
+    await Promise.all([
+      loadFlags(),             // pins/snoozes before first paint
+      loadBreakingNews(key),   // newest alert + offline copy
+    ]);
     render();
     updateNetBar(false);
     flushOutbox();
@@ -1250,7 +1439,10 @@ async function load(key, fromButton) {
       document.body.classList.add("signed-in");
       loadPrefs();          // restore device prefs (sort/aging/density/channels) offline
       loadServerSettings(); // best-effort (no-ops offline)
-      await loadFlags();    // restore pins/snoozes from cache so they aren't lost offline
+      await Promise.all([
+        loadFlags(),             // restore pins/snoozes from cache so they aren't lost offline
+        loadBreakingNews(key),   // restore the last breaking alert
+      ]);
       render();
       updateNetBar(true);
       loadMessages();       // restore cached Texts/DMs offline
@@ -1291,11 +1483,15 @@ async function updateNow() {
   if (!key || btn.disabled) return;
   btn.disabled = true;
   btn.classList.add("spin");
+  btn.setAttribute("aria-busy", "true");
+  btn.setAttribute("aria-label", "Updating");
   const before = BRIEF && BRIEF.generated_at;
   load(key, false); // instant display refresh while the robot spins up
   const done = note => {
     btn.disabled = false;
     btn.classList.remove("spin");
+    btn.removeAttribute("aria-busy");
+    btn.setAttribute("aria-label", "Update now");
     if (note) { updateNetBar(undefined, note); setTimeout(() => updateNetBar(), 6000); }
   };
   let resp = null;
@@ -1324,11 +1520,24 @@ async function updateNow() {
   }, 12000);
 }
 $("updateBtn").addEventListener("click", updateNow);
-$("searchToggle").addEventListener("click", () => {
-  const open = $("app").classList.toggle("search-open");
+function clearSearch() {
+  $("searchBox").value = "";
+  SEARCH = "";
+  reRenderActive();
+  $("searchBox").focus();
+}
+function setSearchOpen(open) {
+  $("app").classList.toggle("search-open", open);
+  $("searchToggle").setAttribute("aria-expanded", String(open));
+  $("searchToggle").setAttribute("aria-label", open ? "Close search" : "Open search");
   if (open) $("searchBox").focus();
-  else { $("searchBox").value = ""; SEARCH = ""; reRenderActive(); }
-});
+  else {
+    $("searchBox").value = "";
+    SEARCH = "";
+    reRenderActive();
+  }
+}
+$("searchToggle").addEventListener("click", () => setSearchOpen(!$("app").classList.contains("search-open")));
 $("prefsBtn").addEventListener("click", () => openSettings());
 $("settingsWrap").addEventListener("click", e => { if (e.target === $("settingsWrap")) closeSettings(); });
 
@@ -1658,6 +1867,8 @@ function switchView(which) {
   $("priorityView").style.display = isPrio ? "block" : "none";
   $("mailView").style.display = isMail ? "block" : "none";
   $("msgView").style.display = isMsg ? "block" : "none";
+  $("msgView").setAttribute("aria-labelledby", which === "dm" ? "tabDM" : "tabMsg");
+  $("breakingNews").classList.toggle("hidden", !isPrio);
   [["tabPriority", isPrio], ["tabMail", isMail], ["tabMsg", which === "msg"], ["tabDM", which === "dm"]]
     .forEach(([id, on]) => {
       $(id).classList.toggle("on", on);
@@ -1702,17 +1913,24 @@ document.addEventListener("keydown", e => {
   if (!document.body.classList.contains("signed-in")) return;
   const typing = e.target && e.target.matches && e.target.matches("input, textarea");
   if (e.key === "Escape") {
-    if (typing) { e.target.blur(); return; }
+    if (typing) {
+      if (e.target === $("searchBox") && $("app").classList.contains("search-open")) {
+        setSearchOpen(false);
+        $("searchToggle").focus();
+      } else {
+        e.target.blur();
+      }
+      return;
+    }
     closeSettings(); closeCompose(); closeReader(); closeThread();
     if ($("app").classList.contains("search-open")) {
       // Also clear the query — otherwise the lists stay filtered by a now-hidden search.
-      $("app").classList.remove("search-open");
-      $("searchBox").value = ""; SEARCH = ""; reRenderActive();
+      setSearchOpen(false);
     }
     return;
   }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (e.key === "/") { e.preventDefault(); $("app").classList.add("search-open"); $("searchBox").focus(); }
+  if (e.key === "/") { e.preventDefault(); setSearchOpen(true); }
   else if (e.key === "1") switchView("priority");
   else if (e.key === "2") switchView("mail");
   else if (e.key === "3") switchView("msg");
@@ -1756,9 +1974,11 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("online", () => {
   updateNetBar(false);
-  flushOutbox();
   const k = localStorage.getItem("mailbrief_key");
+  // A signed-in load already flushes after it finishes refreshing status. Do
+  // not start a competing flush here or the later refresh can erase "sent".
   if (k) load(k, false);
+  else flushOutbox();
 });
 window.addEventListener("offline", () => updateNetBar(true));
 if ("serviceWorker" in navigator) {
@@ -1767,6 +1987,7 @@ if ("serviceWorker" in navigator) {
 
 /* ===== buzz notifications for new important mail ===== */
 const VAPID_PUB = "BECv8w1dKUbZvlj4X6vhWEV9ukkimpvoG38aURLJElDJKigZv3gqabPus448uHk7N7e6Dg9OGw-yFkFeIbk_LQY";
+let ALERTS_SUPPORTED = false;
 
 function b64ToBytes(s) {
   const pad = "=".repeat((4 - s.length % 4) % 4);
@@ -1777,12 +1998,12 @@ function b64ToBytes(s) {
 async function setupAlerts() {
   const btn = $("alertBtn");
   if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return;
-  btn.style.display = "inline-block";
+  ALERTS_SUPPORTED = true;
   try {
     const reg = await navigator.serviceWorker.getRegistration();
     const sub = reg && await reg.pushManager.getSubscription();
     if (sub && Notification.permission === "granted") {
-      btn.textContent = "🔔 Alerts on ✓";
+      btn.textContent = "Alerts on ✓";
       btn.disabled = true;
       return;
     }
@@ -1810,7 +2031,7 @@ async function enableAlerts() {
       body: JSON.stringify({ sub: sub.toJSON(), ua: navigator.userAgent.slice(0, 80), at: Date.now() }),
     });
     if (!r.ok) throw new Error("could not save subscription");
-    btn.textContent = "🔔 Alerts on ✓";
+    btn.textContent = "Alerts on ✓";
     btn.disabled = true;
   } catch (e) {
     btn.textContent = "Alerts failed — tap to retry";

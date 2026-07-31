@@ -30,6 +30,30 @@ public/index.html (Firebase Hosting, deployed on push)
 No mail content is ever committed to this repo or served from Hosting —
 only the Realtime Database holds it, behind the unguessable key path.
 
+## Breaking-news alerts
+
+The Priority view can show one rare, high-signal alert from
+`/briefs/<ACCESS KEY>/news`. News is separate from `/brief`, so a mail refresh
+cannot erase it. The newest unmuted, unexpired story is shown; readers can open
+the one-minute summary or mute the story with Undo.
+
+```json
+[
+  {
+    "id": "ai-regulation-approved",
+    "category": "Technology",
+    "headline": "Major AI regulation approved",
+    "summary": "New compliance rules could affect how businesses use customer data.",
+    "details": "A concise one-minute explanation of what changed and what to do next.",
+    "source": "Reuters",
+    "other_sources": 3,
+    "published_at": 1785436320,
+    "expires_at": 1785522720,
+    "url": "https://example.com/full-coverage"
+  }
+]
+```
+
 ## Secrets (repo → Settings → Secrets and variables → Actions)
 
 | Secret | Format |

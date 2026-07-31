@@ -18,9 +18,9 @@
     <h1>MAIL<span>BRIEF</span></h1>
     <div id="hdrRight">
       <span id="updated"></span>
-      <button id="searchToggle" title="Search" aria-label="Search"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg></button>
+      <button id="searchToggle" title="Search" aria-label="Open search" aria-expanded="false" aria-controls="searchBox"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg></button>
       <button id="prefsBtn" title="Preferences" aria-label="Preferences"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
-      <button id="updateBtn" title="Update now">↻</button>
+      <button id="updateBtn" title="Update now" aria-label="Update now">↻</button>
     </div>
   </header>
 
@@ -29,34 +29,36 @@
     <p>Enter your access key. It will be remembered on this device.</p>
     <label for="keyInput" id="keyLabel">Access key</label>
     <div id="keyField">
-      <input id="keyInput" type="password" autocomplete="current-password" placeholder="access key">
+      <input id="keyInput" type="password" autocomplete="current-password" placeholder="access key" aria-describedby="keyErr">
       <button id="keyReveal" type="button" aria-label="Show access key" aria-pressed="false">Show</button>
     </div>
     <button id="keyBtn">Open</button>
-    <div id="keyErr"></div>
+    <div id="keyErr" role="status" aria-live="polite"></div>
   </div>
 
   <div id="app" style="display:none">
     <div id="netBar"></div>
     <div id="viewTabs" role="tablist" aria-label="Views">
-      <button id="tabPriority" class="vtab on" role="tab" aria-selected="true" tabindex="0"><svg class="vtIco" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l2.9 6.1 6.6.6-5 4.4 1.5 6.5L12 17.3 5.5 20.6 7 14.1 2 9.7l6.6-.6z"/></svg><span class="vtLabel">Priority</span><span id="prioBadge" class="tabBadge"></span></button>
-      <button id="tabMail" class="vtab" role="tab" aria-selected="false" tabindex="-1"><svg class="vtIco" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg><span class="vtLabel">All Mail</span><span id="mailBadge" class="tabBadge"></span></button>
-      <button id="tabMsg" class="vtab" role="tab" aria-selected="false" tabindex="-1"><svg class="vtIco" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.5L3.5 20.5l1.5-5.1A8.4 8.4 0 1 1 21 11.5z"/></svg><span class="vtLabel">Texts</span><span id="msgBadge" class="tabBadge"></span></button>
-      <button id="tabDM" class="vtab" role="tab" aria-selected="false" tabindex="-1"><svg class="vtIco" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.1"/><path d="M3.6 20a5.4 5.4 0 0 1 10.8 0"/><path d="M16 5.3a3.1 3.1 0 0 1 0 5.9"/><path d="M18.4 20a5.4 5.4 0 0 0-3-4.8"/></svg><span class="vtLabel">DMs</span><span id="dmBadge" class="tabBadge"></span></button>
+      <button id="tabPriority" class="vtab on" role="tab" aria-selected="true" aria-controls="priorityView" tabindex="0"><svg class="vtIco" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l2.9 6.1 6.6.6-5 4.4 1.5 6.5L12 17.3 5.5 20.6 7 14.1 2 9.7l6.6-.6z"/></svg><span class="vtLabel">Priority</span><span id="prioBadge" class="tabBadge"></span></button>
+      <button id="tabMail" class="vtab" role="tab" aria-selected="false" aria-controls="mailView" tabindex="-1"><svg class="vtIco" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg><span class="vtLabel">All Mail</span><span id="mailBadge" class="tabBadge"></span></button>
+      <button id="tabMsg" class="vtab" role="tab" aria-selected="false" aria-controls="msgView" tabindex="-1"><svg class="vtIco" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.5L3.5 20.5l1.5-5.1A8.4 8.4 0 1 1 21 11.5z"/></svg><span class="vtLabel">Texts</span><span id="msgBadge" class="tabBadge"></span></button>
+      <button id="tabDM" class="vtab" role="tab" aria-selected="false" aria-controls="msgView" tabindex="-1"><svg class="vtIco" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.1"/><path d="M3.6 20a5.4 5.4 0 0 1 10.8 0"/><path d="M16 5.3a3.1 3.1 0 0 1 0 5.9"/><path d="M18.4 20a5.4 5.4 0 0 0-3-4.8"/></svg><span class="vtLabel">DMs</span><span id="dmBadge" class="tabBadge"></span></button>
     </div>
-    <input id="searchBox" type="search" placeholder="Search…" autocomplete="off">
+    <input id="searchBox" type="search" placeholder="Search mail and conversations…" aria-label="Search current view" autocomplete="off">
+    <section id="breakingNews" class="hidden" aria-live="polite"></section>
     <div id="briefStrip"></div>
-    <div id="priorityView"></div>
-    <div id="mailView" style="display:none">
+    <div id="priorityView" role="tabpanel" aria-labelledby="tabPriority"></div>
+    <div id="mailView" role="tabpanel" aria-labelledby="tabMail" style="display:none">
       <div id="mailTools"><button id="readAllBtn">✓ Mark all read</button></div>
       <div id="chips"></div>
       <div id="content"></div>
       <div id="accStatus"></div>
     </div>
-    <div id="msgView" style="display:none"></div>
-    <button id="alertBtn">🔔 Enable alerts</button>
-    <br>
-    <button id="lockBtn">Sign out of this device</button>
+    <div id="msgView" role="tabpanel" aria-labelledby="tabMsg" style="display:none"></div>
+    <div id="utilityControls">
+      <button id="alertBtn">Enable alerts</button>
+      <button id="lockBtn">Sign out on this device</button>
+    </div>
   </div>
 </div>
 
@@ -68,7 +70,7 @@
   </div>
   <div id="threadBody"></div>
   <div id="threadCompose">
-    <input id="threadInput" type="text" placeholder="Message…">
+    <input id="threadInput" type="text" placeholder="Message…" aria-label="Message">
     <button id="threadSend">Send</button>
   </div>
 </div>
@@ -102,17 +104,17 @@
   <div><span class="dpIcon">✉️</span>Select an email or conversation<br>to read it here.</div>
 </div>
 
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 <div id="snoozeMenu"></div>
 <div id="settingsWrap"><div id="settingsSheet" role="dialog" aria-modal="true" aria-label="Preferences"></div></div>
 
 <div id="composeWrap">
   <div id="composeSheet" role="dialog" aria-modal="true" aria-labelledby="composeTitle">
     <h3 id="composeTitle">REPLY</h3>
-    <input id="composeTo" type="email" placeholder="To">
-    <input id="composeSubj" type="text" placeholder="Subject">
+    <input id="composeTo" type="email" placeholder="To" aria-label="To">
+    <input id="composeSubj" type="text" placeholder="Subject" aria-label="Subject">
     <div id="composeSuggest"></div>
-    <textarea id="composeBody" placeholder="Write your reply… (tap the mic on your keyboard to dictate)"></textarea>
+    <textarea id="composeBody" placeholder="Write your reply… (tap the mic on your keyboard to dictate)" aria-label="Reply"></textarea>
     <div id="composeWarn"></div>
     <div id="composeBtns">
       <button id="composeSend">Send</button>

@@ -16,6 +16,19 @@ test("mobile bottom nav shows icons and switches views", async ({ page }) => {
   await expect(page.locator("#tabMsg")).toHaveAttribute("aria-selected", "true");
 });
 
+test("mobile search exposes state and can recover from no results", async ({ page }) => {
+  await signIn(page);
+  const toggle = page.locator("#searchToggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+  await page.locator("#searchBox").fill("nothing-matches-this");
+  await expect(page.getByText("No priority matches")).toBeVisible();
+  await page.getByRole("button", { name: "Clear search" }).click();
+  await expect(page.getByText("No priority matches")).toBeHidden();
+});
+
 test("arrow keys move between tabs (roving tabindex)", async ({ page }) => {
   await signIn(page);
   await page.locator("#tabPriority").focus();

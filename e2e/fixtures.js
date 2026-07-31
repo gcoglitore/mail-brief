@@ -56,6 +56,20 @@ function makeBrief() {
   };
 }
 
+function makeNews() {
+  return [{
+    id: "ai-regulation-approved",
+    category: "Technology",
+    headline: "Major AI regulation approved",
+    summary: "New compliance rules could affect how businesses use customer data.",
+    details: "The regulation introduces new disclosure, risk-assessment, and data-governance requirements. Businesses should identify affected AI systems and review how customer data is collected, processed, and retained.",
+    source: "Reuters",
+    other_sources: 3,
+    published_at: NOW - 8 * 60,
+    url: "https://www.reuters.com/technology/",
+  }];
+}
+
 function makeMsgs() {
   return {
     chats: [
@@ -97,6 +111,7 @@ async function mockBackend(page, state) {
     if (m === "GET" && p.endsWith("/messages.json")) return route.fulfill({ json: state.msgs });
     if (m === "GET" && p.endsWith("/settings.json")) return route.fulfill({ json: state.settings });
     if (m === "GET" && p.endsWith("/flags.json")) return route.fulfill({ json: state.flags });
+    if (m === "GET" && p.endsWith("/news.json")) return route.fulfill({ json: state.news });
     // Any write (flags PUT, subs POST, msg_outbox POST, settings PUT) just succeeds.
     return route.fulfill({ json: { ok: true, name: "k1" } });
   });
@@ -119,7 +134,7 @@ async function mockBackend(page, state) {
 // Sign in with a mocked backend and wait until the app has painted.
 async function signIn(page, overrides) {
   const state = Object.assign(
-    { brief: makeBrief(), msgs: makeMsgs(), settings: { group_threads: true }, flags: {}, apiOffline: false },
+    { brief: makeBrief(), news: makeNews(), msgs: makeMsgs(), settings: { group_threads: true }, flags: {}, apiOffline: false },
     overrides
   );
   await mockBackend(page, state);
@@ -129,4 +144,4 @@ async function signIn(page, overrides) {
   return state; // mutate state.apiOffline mid-test to toggle connectivity
 }
 
-module.exports = { NOW, makeBrief, makeMsgs, mockBackend, signIn };
+module.exports = { NOW, makeBrief, makeNews, makeMsgs, mockBackend, signIn };

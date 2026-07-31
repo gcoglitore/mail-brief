@@ -66,6 +66,52 @@
     display: none; margin-bottom: 12px; padding: 9px 13px; border-radius: 10px;
     font-size: 13px; background: var(--panel2); border: 1px solid var(--line); color: var(--gold);
   }
+  /* Rare, high-signal breaking-news alert at the top of Priority. */
+  #breakingNews { margin-bottom: 14px; }
+  #breakingNews.hidden { display: none; }
+  .breakingAlert {
+    position: relative; overflow: hidden; padding: 16px 17px 15px; border-radius: 14px;
+    background:
+      radial-gradient(circle at 100% 0, rgba(224,86,79,.13), transparent 48%),
+      var(--panel);
+    border: 1px solid rgba(224,86,79,.42); border-left: 3px solid var(--red);
+    box-shadow: 0 12px 32px rgba(0,0,0,.18);
+  }
+  .breakingKicker {
+    display: flex; align-items: center; gap: 7px; color: var(--red);
+    font-size: 10.5px; font-weight: 900; letter-spacing: 1.5px;
+  }
+  .breakingPulse {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--red);
+    box-shadow: 0 0 0 0 rgba(224,86,79,.55); animation: breakingPulse 2s infinite;
+  }
+  @keyframes breakingPulse {
+    0% { box-shadow: 0 0 0 0 rgba(224,86,79,.5); }
+    65%, 100% { box-shadow: 0 0 0 7px rgba(224,86,79,0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .breakingPulse { animation: none; }
+  }
+  .breakingHeadline { margin: 7px 0 3px; font-size: 18px; line-height: 1.25; letter-spacing: -.15px; }
+  .breakingSummary { color: var(--text); font-size: 13.5px; line-height: 1.45; }
+  .breakingMeta { margin-top: 7px; color: var(--dim); font-size: 11.5px; }
+  .breakingActions { display: flex; align-items: center; gap: 9px; margin-top: 13px; }
+  .breakingActions button {
+    min-height: 36px; padding: 8px 12px; border-radius: 9px;
+    font-size: 12.5px; font-weight: 800; cursor: pointer;
+  }
+  .breakingRead { border: 1px solid var(--red); background: var(--red); color: #fff; }
+  .breakingRead:hover { filter: brightness(1.08); }
+  .breakingMute { border: 1px solid transparent; background: none; color: var(--dim); }
+  .breakingMute:hover { color: var(--text); border-color: var(--line); background: var(--panel2); }
+  .breakingDetails {
+    margin-top: 13px; padding-top: 12px; border-top: 1px solid rgba(224,86,79,.25);
+    color: var(--dim); font-size: 13px; line-height: 1.5;
+  }
+  .breakingDetails[hidden] { display: none; }
+  .breakingDetailsLabel { margin-bottom: 5px; color: var(--red); font-size: 9.5px; font-weight: 900; letter-spacing: 1.3px; }
+  .breakingCoverage { display: inline-block; margin-top: 8px; color: var(--blue); font-size: 12.5px; text-decoration: none; }
+  .breakingCoverage:hover { color: var(--gold); }
   /* Command-center daily brief */
   #briefStrip { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
   #briefStrip.hidden { display: none; }
@@ -155,6 +201,12 @@
     padding: 12px 14px; margin-bottom: 8px; display: block; color: inherit;
     text-decoration: none;
   }
+  .cardOpen {
+    display: block; width: 100%; padding: 0; border: 0; border-radius: 7px;
+    background: none; color: inherit; text-align: left; text-decoration: none;
+    font: inherit; cursor: pointer;
+  }
+  .cardOpen:focus-visible { outline-offset: 5px; }
   .card.attn { border-left: 3px solid var(--red); }
   .row1 { display: flex; align-items: center; gap: 8px; }
   .acct {
@@ -340,15 +392,31 @@
   #composeErr { color: var(--red); font-size: 13px; min-height: 18px; margin-top: 6px; }
   #accStatus { margin-top: 26px; font-size: 12px; color: var(--faint); }
   #accStatus .bad { color: var(--red); }
-  #lockBtn { background: none; border: 0; color: var(--faint); font-size: 12px;
-             text-decoration: underline; cursor: pointer; margin-top: 8px; }
+  #utilityControls { display: none; }
+  #lockBtn { background: none; border: 0; color: var(--dim); font-size: 12px;
+             text-decoration: underline; cursor: pointer; }
   #alertBtn {
     display: none; margin: 14px 10px 0 0; padding: 8px 18px; border-radius: 9px;
     border: 1px solid var(--line); background: var(--panel2); color: var(--gold);
     font-size: 13px; font-weight: 700; cursor: pointer;
   }
   #alertBtn:disabled { color: var(--green); cursor: default; }
+  #settingsSheet #alertBtn {
+    display: inline-block; margin: 0; padding: 7px 12px; white-space: nowrap;
+  }
+  #settingsSheet #lockBtn { margin: 0; white-space: nowrap; }
   .empty { color: var(--faint); font-size: 13px; padding: 8px 2px; }
+  .emptyState {
+    margin-top: 8px; padding: 24px 18px; border: 1px dashed var(--line);
+    border-radius: 12px; text-align: center; background: rgba(18,25,34,.55);
+  }
+  .emptyTitle { color: var(--text); font-size: 15px; font-weight: 800; }
+  .emptyCopy { max-width: 360px; margin: 5px auto 0; color: var(--dim); font-size: 13px; }
+  .emptyAction {
+    margin-top: 13px; padding: 8px 14px; border-radius: 9px; border: 1px solid var(--gold);
+    background: rgba(212,168,67,.12); color: var(--gold); font-size: 13px;
+    font-weight: 800; cursor: pointer;
+  }
 
   /* view tabs */
   #mailTools, #msgTools { display: flex; justify-content: flex-end; margin-bottom: 8px; }
@@ -370,8 +438,14 @@
     font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px;
   }
   /* chat list */
-  .chat { display: flex; align-items: center; gap: 11px; padding: 11px 12px; cursor: pointer;
+  .chat { display: flex; align-items: center; gap: 7px; padding: 11px 12px;
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; }
+  .chatOpen {
+    display: flex; align-items: center; gap: 11px; flex: 1; min-width: 0; padding: 0;
+    border: 0; border-radius: 7px; background: none; color: inherit; text-align: left;
+    font: inherit; cursor: pointer;
+  }
+  .chatOpen:focus-visible { outline-offset: 5px; }
   .net { font-size: 9px; font-weight: 800; letter-spacing: .5px; padding: 3px 7px; border-radius: 6px;
     white-space: nowrap; color: #fff; }
   .net.signal { background: #3a76f0; } .net.slack { background: #611f69; }
@@ -446,6 +520,10 @@
   }
   /* Mobile top slim-down (#2): one-line summary + collapsible search */
   @media (max-width: 620px) {
+    .breakingAlert { padding: 14px; }
+    .breakingHeadline { font-size: 17px; }
+    .breakingActions { align-items: stretch; }
+    .breakingActions button { flex: 1; padding-left: 8px; padding-right: 8px; }
     #briefStrip { display: block; }
     #briefStrip.hidden { display: none; }
     #briefStrip .statCell { display: none; }
