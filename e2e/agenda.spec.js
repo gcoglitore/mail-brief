@@ -15,6 +15,13 @@ test("Priority shows the calendar agenda with an in-progress marker", async ({ p
   const live = page.locator(".agendaRow.now");
   await expect(live).toHaveCount(1);
   await expect(live).toContainText("Standup");
+
+  // Mail Brief stays action-first: calendar context follows actionable items.
+  const [firstActionY, agendaY] = await Promise.all([
+    page.locator("#priorityView .card").first().evaluate(el => el.getBoundingClientRect().top),
+    agenda.evaluate(el => el.getBoundingClientRect().top),
+  ]);
+  expect(firstActionY).toBeLessThan(agendaY);
 });
 
 test("no agenda block when the calendar is empty", async ({ page }) => {

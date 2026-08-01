@@ -19,3 +19,13 @@ test("row-density preference persists across a reload", async ({ page }) => {
   await page.waitForSelector("body.signed-in");
   await expect(page.locator("body")).toHaveClass(/compact/); // restored from localStorage
 });
+
+test("account and notification utilities stay out of the daily feed", async ({ page }) => {
+  await signIn(page);
+  await expect(page.locator("#lockBtn")).toBeHidden();
+  await expect(page.locator("#alertBtn")).toBeHidden();
+
+  await page.locator("#prefsBtn").click();
+  await expect(page.getByRole("button", { name: "Sign out on this device" })).toBeVisible();
+  await expect(page.getByText("Priority and breaking alerts")).toBeVisible();
+});

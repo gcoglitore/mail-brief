@@ -28,3 +28,30 @@ test("row overflow menu restores focus to the More button on Escape", async ({ p
     await page.evaluate(() => document.activeElement && document.activeElement.getAttribute("aria-label") === "More actions")
   ).toBe(true);
 });
+
+test("email and conversation rows open from the keyboard", async ({ page }) => {
+  await signIn(page);
+
+  const email = page.getByRole("button", {
+    name: "Open Term sheet — sign by Friday? from Dana Investor",
+  });
+  await email.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#reader")).toBeVisible();
+  await page.locator("#readerBack").click();
+
+  const chat = page.getByRole("button", { name: "Open and reply to Sarah via iMessage" });
+  await chat.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#thread")).toHaveClass(/open/);
+});
+
+test("preference switches have accessible names and state", async ({ page }) => {
+  await signIn(page);
+  await page.locator("#prefsBtn").click();
+  const texts = page.getByRole("switch", { name: "Include Texts (iMessage / SMS)" });
+  await expect(texts).toHaveAttribute("aria-checked", "true");
+  await texts.click();
+  await expect(page.getByRole("switch", { name: "Include Texts (iMessage / SMS)" }))
+    .toHaveAttribute("aria-checked", "false");
+});

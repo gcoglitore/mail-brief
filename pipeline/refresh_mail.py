@@ -13,6 +13,7 @@ Configuration via environment variables (GitHub Actions secrets):
 import email
 import email.header
 import email.utils
+import datetime as dt
 import html as html_lib
 from html.parser import HTMLParser
 import imaplib
@@ -23,12 +24,15 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from zoneinfo import ZoneInfo
 
 DB_URL = "https://mail-brief-gio-default-rtdb.firebaseio.com"
 LOOKBACK_DAYS = 3
 MAX_PER_ACCOUNT = 60
 SNIPPET_LEN = 180
 BODY_LEN = 2500  # readable-text cap after quote/signature stripping; junk carries none
+PACIFIC = ZoneInfo("America/Los_Angeles")
+MORNING_BRIEF_HOUR = 7
 
 JUNK_DOMAINS = (
     "goalphalabs.com", "orbitz.com", "reply.ebay.com", "learn.heygen.com",
@@ -453,14 +457,180 @@ def item_id(i):
     return i.get("msgid") or "{}|{}|{}".format(i.get("from_email", ""), i.get("subject", ""), i.get("ts", ""))
 
 
+def entry_id(kind, value):
+    """Match the browser's stable mail:/msg: identifier and Firebase-safe key."""
+    raw = f"{kind}:{value or ''}"
+    return re.sub(r"[.#$\[\]/]", "_", raw) if value else ""
+
+
+def pacific_date(now):
+    return dt.datetime.fromtimestamp(now, tz=dt.timezone.utc).astimezone(PACIFIC)
+
+
+def _today_events(calendar, local_now):
+    today = local_now.date()
+    out = []
+    for event in calendar or []:
+        if not event or not event.get("start"):
+            continue
+        start = dt.datetime.fromtimestamp(event["start"], tz=dt.timezone.utc)
+        event_day = start.date() if event.get("all_day") else start.astimezone(PACIFIC).date()
+        if event_day == today:
+            out.append({
+                "title": (event.get("title") or "(busy)")[:120],
+                "start": int(event["start"]),
+                "end": int(event.get("end") or event["start"]),
+                "location": (event.get("location") or "")[:120],
+                "all_day": bool(event.get("all_day")),
+            })
+    return sorted(out, key=lambda e: e["start"])[:4]
+
+
+def build_daily_brief(items, calendar, messages=None, flags=None, now=None):
+    """Create one compact, source-backed morning plan from all inbox channels.
+
+    The brief deliberately stores references and short action labels, not copied
+    message bodies. The browser resolves each reference back to the real email or
+    conversation when the user opens it.
+    """
+    now = int(now or time.time())
+    local_now = pacific_date(now)
+    flags = flags if isinstance(flags, dict) else {}
+    candidates = []
+    mail_count = 0
+    mail_replies = 0
+    overdue = 0
+
+    for item in items or []:
+        if item.get("bucket") != "attention" or item.get("stale"):
+            continue
+        eid = entry_id("mail", item_id(item))
+        flag = flags.get(eid, {}) if eid else {}
+        if flag.get("snooze", 0) > now:
+            continue
+        mail_count += 1
+        sig = item.get("signals") or {}
+        needs_reply = bool(sig.get("reply")) if item.get("signals") is not None \
+            else bool(item.get("reply_to") and item.get("unread"))
+        if needs_reply:
+            mail_replies += 1
+        age_days = max(0, (now - int(item.get("ts") or now)) // 86400)
+        if age_days >= 2:
+            overdue += 1
+        reason = "Pinned" if flag.get("pin") else (
+            "Reply needed" if needs_reply else
+            "Review or sign" if sig.get("doc") else
+            "Meeting or deadline" if sig.get("meeting") else
+            "Unread priority" if item.get("unread") else "Needs attention")
+        rank = (0 if flag.get("pin") else 1 if needs_reply else 2 if sig.get("doc")
+                else 3 if sig.get("meeting") else 4 if item.get("unread") else 5)
+        candidates.append({
+            "kind": "mail", "id": eid,
+            "title": (item.get("action_summary") or item.get("subject") or "Email needs attention")[:120],
+            "source": (item.get("from_name") or item.get("from_email") or "Email")[:80],
+            "channel": (item.get("account") or "Mail")[:40],
+            "reason": reason, "ts": int(item.get("ts") or 0), "_rank": rank,
+        })
+
+    chats = (messages or {}).get("chats", []) if isinstance(messages, dict) else []
+    conversation_count = 0
+    for chat in chats:
+        unread = int(chat.get("unread") or 0)
+        if unread <= 0 or not chat.get("id"):
+            continue
+        eid = entry_id("msg", chat.get("id"))
+        flag = flags.get(eid, {})
+        if flag.get("snooze", 0) > now:
+            continue
+        conversation_count += 1
+        age_days = max(0, (now - int(chat.get("ts") or now)) // 86400)
+        if age_days >= 2:
+            overdue += 1
+        network = (chat.get("network") or "DM").strip()
+        candidates.append({
+            "kind": "message", "id": eid,
+            "title": (chat.get("preview") or "Unread conversation")[:120],
+            "source": (chat.get("title") or "Conversation")[:80],
+            "channel": network[:40],
+            "reason": "Pinned" if flag.get("pin") else f"{unread} unread",
+            "ts": int(chat.get("ts") or 0), "_rank": 0 if flag.get("pin") else 1,
+        })
+
+    # Within the same action tier, the oldest waiting item comes first.
+    candidates.sort(key=lambda x: (x["_rank"], x["ts"] or now))
+    focus = []
+    for row in candidates[:3]:
+        row = dict(row)
+        row.pop("_rank", None)
+        focus.append(row)
+
+    schedule = _today_events(calendar, local_now)
+    reply_total = mail_replies + conversation_count
+    if reply_total and schedule:
+        headline = f"{reply_total} {'reply' if reply_total == 1 else 'replies'} and {len(schedule)} " \
+                   f"{'event' if len(schedule) == 1 else 'events'} shape today"
+    elif reply_total:
+        headline = f"{reply_total} {'reply needs' if reply_total == 1 else 'replies need'} you today"
+    elif schedule:
+        headline = f"{len(schedule)} {'event' if len(schedule) == 1 else 'events'} on your calendar today"
+    elif focus:
+        headline = f"{len(focus)} priorities to move forward"
+    else:
+        headline = "You're clear for today"
+
+    if focus:
+        summary = "Start with " + focus[0]["title"].rstrip(". ") + "."
+        if schedule:
+            summary += " Your calendar has " + str(len(schedule)) + \
+                       (" event." if len(schedule) == 1 else " events.")
+    elif schedule:
+        summary = "Your inbox is quiet; the day is organized around your calendar."
+    else:
+        summary = "Nothing urgent is waiting across mail, texts, DMs, or calendar."
+
+    return {
+        "date": local_now.date().isoformat(),
+        "timezone": "America/Los_Angeles",
+        "generated_at": now,
+        "headline": headline,
+        "summary": summary,
+        "counts": {
+            "mail": mail_count,
+            "replies": reply_total,
+            "conversations": conversation_count,
+            "events": len(schedule),
+            "overdue": overdue,
+        },
+        "focus": focus,
+        "schedule": schedule,
+    }
+
+
+def should_generate_daily_brief(previous, requested_at=None, now=None):
+    now = int(now or time.time())
+    local_now = pacific_date(now)
+    if requested_at:
+        return True
+    if local_now.hour < MORNING_BRIEF_HOUR:
+        return False
+    return not isinstance(previous, dict) or previous.get("date") != local_now.date().isoformat()
+
+
 def db_get(path, token):
     req = urllib.request.Request(DB_URL + path, headers={"Authorization": "Bearer " + token})
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read() or b"null")
 
 
-def notify_subscribers(new_items, key, token, unread=None):
-    """Web-push a buzz to every subscribed device about newly arrived attention mail."""
+def db_delete(path, token):
+    req = urllib.request.Request(DB_URL + path, method="DELETE",
+                                 headers={"Authorization": "Bearer " + token})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        resp.read()
+
+
+def push_to_subscribers(payload_obj, key, token, label):
+    """Deliver one source-backed push payload and remove expired subscriptions."""
     pem_path = os.environ.get("VAPID_PEM_PATH")
     claim = os.environ.get("VAPID_SUB")
     if not pem_path or not claim:
@@ -476,15 +646,6 @@ def notify_subscribers(new_items, key, token, unread=None):
         return
     if not subs:
         return
-    if len(new_items) == 1:
-        title, body = new_items[0]["from_name"], new_items[0]["subject"]
-    else:
-        title = f"{len(new_items)} important emails"
-        body = "; ".join(i["from_name"] for i in new_items[:4])
-    payload_obj = {"title": title[:80], "body": body[:180],
-                   "url": "https://mail-brief-gio.web.app"}
-    if unread is not None:
-        payload_obj["unread"] = int(unread)  # updates the home-screen icon badge
     payload = json.dumps(payload_obj)
     sent = 0
     for sid, rec in subs.items():
@@ -505,7 +666,32 @@ def notify_subscribers(new_items, key, token, unread=None):
                     urllib.request.urlopen(req, timeout=15)
                 except Exception:
                     pass
-    print(f"Notifications: buzzed {sent} device(s) about {len(new_items)} new item(s)")
+    print(f"Notifications: buzzed {sent} device(s) with {label}")
+
+
+def notify_subscribers(new_items, key, token, unread=None):
+    """Web-push a buzz to every subscribed device about newly arrived attention mail."""
+    if len(new_items) == 1:
+        title, body = new_items[0]["from_name"], new_items[0]["subject"]
+    else:
+        title = f"{len(new_items)} important emails"
+        body = "; ".join(i["from_name"] for i in new_items[:4])
+    payload = {"title": title[:80], "body": body[:180],
+               "url": "https://mail-brief-gio.web.app"}
+    if unread is not None:
+        payload["unread"] = int(unread)  # updates the home-screen icon badge
+    push_to_subscribers(payload, key, token, f"{len(new_items)} new item(s)")
+
+
+def notify_daily_brief(daily, key, token, unread=None):
+    payload = {
+        "title": "Your morning brief",
+        "body": (daily.get("headline") or "Your day is ready")[:180],
+        "url": "https://mail-brief-gio.web.app",
+    }
+    if unread is not None:
+        payload["unread"] = int(unread)
+    push_to_subscribers(payload, key, token, "the morning brief")
 
 
 def db_token(sa_json):
@@ -583,6 +769,16 @@ def main():
     except Exception:
         prev = None
 
+    # The morning brief is generated once on the first successful refresh after
+    # 7:00 AM Pacific. The UI can request an explicit rebuild by writing a small
+    # timestamp flag; it is deleted only after a successful publish.
+    try:
+        daily_requested = db_get(f"/briefs/{key}/daily_refresh_requested.json", token)
+    except Exception:
+        daily_requested = None
+    previous_daily = prev.get("daily_brief") if isinstance(prev, dict) else None
+    generate_daily = should_generate_daily_brief(previous_daily, daily_requested)
+
     # DATA-LOSS GUARD: if an account failed to log in this run, keep its mail from
     # the last brief (flagged stale) rather than dropping it. A transient IMAP
     # hiccup on one account must never erase that account's inbox from the app.
@@ -612,6 +808,22 @@ def main():
             print(f"Calendar skipped (kept previous): {str(exc)[:120]}")
 
     all_items.sort(key=lambda i: i["ts"], reverse=True)
+    daily_brief = previous_daily
+    daily_generated = False
+    if generate_daily:
+        try:
+            message_snapshot = db_get(f"/briefs/{key}/messages.json", token) or {}
+        except Exception:
+            message_snapshot = {}
+        try:
+            flags = db_get(f"/briefs/{key}/flags.json", token) or {}
+        except Exception:
+            flags = {}
+        daily_brief = build_daily_brief(all_items, calendar, message_snapshot, flags)
+        daily_generated = True
+        print(f"Morning brief: generated {daily_brief['date']} with "
+              f"{len(daily_brief['focus'])} focus item(s) and {len(daily_brief['schedule'])} event(s)")
+
     brief = {
         "generated_at": int(time.time()),
         "accounts": statuses,
@@ -620,6 +832,8 @@ def main():
         "counts": {b: sum(1 for i in all_items if i["bucket"] == b and not i.get("stale"))
                    for b in ("attention", "fyi", "junk")},
     }
+    if isinstance(daily_brief, dict):
+        brief["daily_brief"] = daily_brief
 
     prev_ids = ({item_id(i) for i in prev.get("items", []) if i.get("bucket") == "attention"}
                 if isinstance(prev, dict) else None)
@@ -632,14 +846,24 @@ def main():
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         resp.read()
+    if daily_generated and daily_requested:
+        try:
+            db_delete(f"/briefs/{key}/daily_refresh_requested.json", token)
+        except Exception as exc:
+            print(f"Morning brief: could not clear refresh request ({str(exc)[:100]})")
     print(f"Published {len(all_items)} items "
           f"(attention {brief['counts']['attention']}, fyi {brief['counts']['fyi']}, junk {brief['counts']['junk']})")
+
+    unread_total = sum(1 for i in all_items if i.get("unread") and not i.get("stale"))
+    if daily_generated and not daily_requested:
+        notify_daily_brief(daily_brief, key, token, unread=unread_total)
 
     if prev_ids is not None:
         new_attention = [i for i in all_items
                          if i["bucket"] == "attention" and item_id(i) not in prev_ids]
-        if new_attention:
-            unread_total = sum(1 for i in all_items if i.get("unread") and not i.get("stale"))
+        # The morning push already summarizes the day; avoid immediately stacking
+        # a second notification for mail included in that same snapshot.
+        if new_attention and not (daily_generated and not daily_requested):
             notify_subscribers(new_attention, key, token, unread=unread_total)
 
 

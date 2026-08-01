@@ -6,6 +6,13 @@
 // account. The page itself is served from localhost and is NOT intercepted.
 
 const NOW = Math.floor(Date.now() / 1000);
+function pacificDateKey() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const get = t => parts.find(p => p.type === t).value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
 
 function makeBrief() {
   return {
@@ -16,6 +23,22 @@ function makeBrief() {
       { title: "Standup", start: NOW - 600, end: NOW + 600, location: "", all_day: false }, // in progress
       { title: "Design review", start: NOW + 90000, end: NOW + 93600, location: "Room 2", all_day: false },
     ],
+    daily_brief: {
+      date: pacificDateKey(),
+      timezone: "America/Los_Angeles",
+      generated_at: NOW - 120,
+      headline: "3 replies and 2 events shape today",
+      summary: "Start with Sign term sheet, page 4. Your calendar has 2 events.",
+      counts: { mail: 2, replies: 3, conversations: 2, events: 2, overdue: 1 },
+      focus: [
+        { kind: "mail", id: "mail:m1@x", title: "Sign term sheet, page 4", source: "Dana Investor", channel: "QLAD", reason: "Reply needed", ts: NOW - 3 * 86400 },
+        { kind: "message", id: "msg:c1", title: "see you at 6", source: "Sarah", channel: "imessage", reason: "2 unread", ts: NOW - 1200 },
+      ],
+      schedule: [
+        { title: "Standup", start: NOW - 600, end: NOW + 600, location: "", all_day: false },
+        { title: "Board call", start: NOW + 3600, end: NOW + 5400, location: "Zoom", all_day: false },
+      ],
+    },
     items: [
       {
         account: "QLAD",
@@ -56,6 +79,20 @@ function makeBrief() {
   };
 }
 
+function makeNews() {
+  return [{
+    id: "ai-regulation-approved",
+    category: "Technology",
+    headline: "Major AI regulation approved",
+    summary: "New compliance rules could affect how businesses use customer data.",
+    details: "The regulation introduces new disclosure, risk-assessment, and data-governance requirements. Businesses should identify affected AI systems and review how customer data is collected, processed, and retained.",
+    source: "Reuters",
+    other_sources: 3,
+    published_at: NOW - 8 * 60,
+    url: "https://www.reuters.com/technology/",
+  }];
+}
+
 function makeMsgs() {
   return {
     chats: [
@@ -66,6 +103,7 @@ function makeMsgs() {
         preview: "see you at 6",
         ts: NOW - 1200,
         unread: 2,
+        sendable: true,
         messages: [
           { text: "running late?", ts: NOW - 1300, is_me: false },
           { text: "map here www.example.com/spot see you at 6", ts: NOW - 1200, is_me: false },
@@ -79,6 +117,7 @@ function makeMsgs() {
         ts: NOW - 4000,
         unread: 1,
         group: true,
+        sendable: true,
         messages: [{ text: "deploy done", ts: NOW - 4000, is_me: false, sender: "Priya" }],
       },
     ],
@@ -97,6 +136,8 @@ async function mockBackend(page, state) {
     if (m === "GET" && p.endsWith("/messages.json")) return route.fulfill({ json: state.msgs });
     if (m === "GET" && p.endsWith("/settings.json")) return route.fulfill({ json: state.settings });
     if (m === "GET" && p.endsWith("/flags.json")) return route.fulfill({ json: state.flags });
+    if (m === "GET" && p.endsWith("/news.json")) return route.fulfill({ json: state.news });
+    if (m === "PUT" && p.includes("/msg_outbox/") && state.msgQueueOffline) return route.abort("failed");
     // Any write (flags PUT, subs POST, msg_outbox POST, settings PUT) just succeeds.
     return route.fulfill({ json: { ok: true, name: "k1" } });
   });
@@ -119,7 +160,7 @@ async function mockBackend(page, state) {
 // Sign in with a mocked backend and wait until the app has painted.
 async function signIn(page, overrides) {
   const state = Object.assign(
-    { brief: makeBrief(), msgs: makeMsgs(), settings: { group_threads: true }, flags: {}, apiOffline: false },
+    { brief: makeBrief(), news: makeNews(), msgs: makeMsgs(), settings: { group_threads: true }, flags: {}, apiOffline: false, msgQueueOffline: false },
     overrides
   );
   await mockBackend(page, state);
@@ -129,4 +170,4 @@ async function signIn(page, overrides) {
   return state; // mutate state.apiOffline mid-test to toggle connectivity
 }
 
-module.exports = { NOW, makeBrief, makeMsgs, mockBackend, signIn };
+module.exports = { NOW, makeBrief, makeNews, makeMsgs, mockBackend, signIn };

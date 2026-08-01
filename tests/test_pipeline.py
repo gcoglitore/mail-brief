@@ -6,12 +6,66 @@ and item identity. (Failed-account merge / IMAP paths need integration fixtures
 and are tracked separately.)
 """
 import email.message
+import datetime as dt
 import os
 import sys
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "pipeline"))
 import refresh_mail as rm  # noqa: E402
+
+
+class DailyBrief(unittest.TestCase):
+    def setUp(self):
+        self.now = int(dt.datetime(2026, 7, 31, 14, 5, tzinfo=dt.timezone.utc).timestamp())  # 7:05 AM PDT
+
+    def test_combines_mail_messages_and_todays_calendar(self):
+        items = [
+            {"msgid": "reply@x", "bucket": "attention", "from_name": "Dana", "account": "QLAD",
+             "subject": "Term sheet", "action_summary": "Sign term sheet", "ts": self.now - 3 * 86400,
+             "unread": True, "reply_to": "dana@x.com", "signals": {"reply": True, "doc": True}},
+            {"msgid": "later@x", "bucket": "attention", "from_name": "Bob", "account": "Personal",
+             "subject": "FYI follow-up", "ts": self.now - 600, "unread": True,
+             "signals": {"reply": False, "doc": False, "meeting": False}},
+            {"msgid": "junk@x", "bucket": "junk", "from_name": "Promo", "ts": self.now},
+        ]
+        messages = {"chats": [{"id": "signal-1", "network": "signal", "title": "Sam",
+                                "preview": "Can you confirm?", "unread": 2, "ts": self.now - 3600}]}
+        calendar = [
+            {"title": "Board call", "start": self.now + 3600, "end": self.now + 5400,
+             "location": "Zoom", "all_day": False},
+            {"title": "Tomorrow", "start": self.now + 86400, "end": self.now + 90000,
+             "location": "", "all_day": False},
+        ]
+
+        out = rm.build_daily_brief(items, calendar, messages, now=self.now)
+
+        self.assertEqual(out["date"], "2026-07-31")
+        self.assertEqual(out["counts"], {"mail": 2, "replies": 2, "conversations": 1,
+                                         "events": 1, "overdue": 1})
+        self.assertEqual([x["id"] for x in out["focus"][:2]], ["mail:reply@x", "msg:signal-1"])
+        self.assertEqual(out["schedule"][0]["title"], "Board call")
+        self.assertIn("2 replies", out["headline"])
+
+    def test_snoozed_items_are_left_out(self):
+        items = [{"msgid": "later@x", "bucket": "attention", "from_name": "Bob",
+                  "subject": "Wait", "ts": self.now - 100, "unread": True,
+                  "signals": {"reply": True}}]
+        flags = {"mail:later@x": {"snooze": self.now + 3600}}
+
+        out = rm.build_daily_brief(items, [], {}, flags, now=self.now)
+
+        self.assertEqual(out["counts"]["mail"], 0)
+        self.assertEqual(out["counts"]["replies"], 0)
+        self.assertEqual(out["focus"], [])
+
+    def test_generates_after_seven_once_or_when_requested(self):
+        before = int(dt.datetime(2026, 7, 31, 13, 55, tzinfo=dt.timezone.utc).timestamp())
+        previous = {"date": "2026-07-31"}
+        self.assertFalse(rm.should_generate_daily_brief(None, now=before))
+        self.assertTrue(rm.should_generate_daily_brief(None, now=self.now))
+        self.assertFalse(rm.should_generate_daily_brief(previous, now=self.now))
+        self.assertTrue(rm.should_generate_daily_brief(previous, requested_at=self.now * 1000, now=self.now))
 
 
 class HtmlToText(unittest.TestCase):
