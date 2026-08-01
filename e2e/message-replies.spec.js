@@ -35,6 +35,32 @@ test("replies to a Signal conversation from the DMs view", async ({ page }) => {
   await expect(page.getByText(/Queued for your Mac/).first()).toBeVisible();
 });
 
+test("keeps the mobile reply composer above the bottom navigation", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page);
+  await page.getByRole("tab", { name: /Texts/ }).click();
+  await page.getByRole("button", { name: /Open and reply to Sarah via iMessage/ }).click();
+
+  const layout = await page.evaluate(() => {
+    const thread = document.querySelector("#thread");
+    const composer = document.querySelector("#threadCompose");
+    const navigation = document.querySelector("#viewTabs");
+    const threadBox = thread.getBoundingClientRect();
+    const composerBox = composer.getBoundingClientRect();
+    return {
+      viewportBottom: window.innerHeight,
+      threadBottom: threadBox.bottom,
+      composerBottom: composerBox.bottom,
+      threadZ: Number(getComputedStyle(thread).zIndex),
+      navigationZ: Number(getComputedStyle(navigation).zIndex),
+    };
+  });
+
+  expect(layout.threadBottom).toBeLessThanOrEqual(layout.viewportBottom + 1);
+  expect(layout.composerBottom).toBeLessThanOrEqual(layout.viewportBottom + 1);
+  expect(layout.threadZ).toBeGreaterThan(layout.navigationZ);
+});
+
 test("keeps a chat reply locally and queues it after reconnecting", async ({ page }) => {
   const state = await signIn(page, { msgQueueOffline: true });
   await page.getByRole("tab", { name: /Texts/ }).click();
