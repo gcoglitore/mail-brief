@@ -6,6 +6,13 @@
 // account. The page itself is served from localhost and is NOT intercepted.
 
 const NOW = Math.floor(Date.now() / 1000);
+function pacificDateKey() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const get = t => parts.find(p => p.type === t).value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
 
 function makeBrief() {
   return {
@@ -16,6 +23,22 @@ function makeBrief() {
       { title: "Standup", start: NOW - 600, end: NOW + 600, location: "", all_day: false }, // in progress
       { title: "Design review", start: NOW + 90000, end: NOW + 93600, location: "Room 2", all_day: false },
     ],
+    daily_brief: {
+      date: pacificDateKey(),
+      timezone: "America/Los_Angeles",
+      generated_at: NOW - 120,
+      headline: "3 replies and 2 events shape today",
+      summary: "Start with Sign term sheet, page 4. Your calendar has 2 events.",
+      counts: { mail: 2, replies: 3, conversations: 2, events: 2, overdue: 1 },
+      focus: [
+        { kind: "mail", id: "mail:m1@x", title: "Sign term sheet, page 4", source: "Dana Investor", channel: "QLAD", reason: "Reply needed", ts: NOW - 3 * 86400 },
+        { kind: "message", id: "msg:c1", title: "see you at 6", source: "Sarah", channel: "imessage", reason: "2 unread", ts: NOW - 1200 },
+      ],
+      schedule: [
+        { title: "Standup", start: NOW - 600, end: NOW + 600, location: "", all_day: false },
+        { title: "Board call", start: NOW + 3600, end: NOW + 5400, location: "Zoom", all_day: false },
+      ],
+    },
     items: [
       {
         account: "QLAD",

@@ -30,6 +30,20 @@ public/index.html (Firebase Hosting, deployed on push)
 No mail content is ever committed to this repo or served from Hosting —
 only the Realtime Database holds it, behind the unguessable key path.
 
+## Morning brief
+
+The first successful refresh after **7:00 AM America/Los_Angeles** generates one
+source-backed daily plan from attention email, unread texts/DMs, pin/snooze
+state, and today's Google Calendar events. It includes a concise headline,
+three ranked starting points, counts, and the day's first events. Each priority
+opens the underlying email or conversation; the brief never copies full message
+bodies into a second data store.
+
+The result is saved as `brief.daily_brief` and remains stable for the day. A
+**Refresh brief** control writes a one-shot `daily_refresh_requested` timestamp
+and dispatches the normal refresh workflow. Devices with alerts enabled receive
+one morning notification; that run suppresses a redundant new-mail push.
+
 ## Breaking-news alerts
 
 The Priority view can show one rare, high-signal alert from

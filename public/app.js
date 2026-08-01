@@ -795,6 +795,138 @@ function renderBriefStrip(attn) {
   });
 }
 
+function pacificDateKey(ms) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date(ms == null ? Date.now() : ms));
+  const get = t => (parts.find(p => p.type === t) || {}).value || "";
+  return get("year") + "-" + get("month") + "-" + get("day");
+}
+function currentDailyBrief() {
+  const daily = BRIEF && BRIEF.daily_brief;
+  return daily && daily.date === pacificDateKey() ? daily : null;
+}
+function pacificHour() {
+  return Number(new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles", hour: "numeric", hour12: false,
+  }).format(new Date())) % 24;
+}
+function dailyEventTime(event) {
+  if (event.all_day) return "All day";
+  return new Date(event.start * 1000).toLocaleTimeString([], {
+    timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit",
+  });
+}
+async function openDailyFocus(focus) {
+  if (!focus) return;
+  if (focus.kind === "mail") {
+    const item = ((BRIEF && BRIEF.items) || []).find(i => entryId(i) === focus.id);
+    if (item) openReader(item); else switchView("mail");
+    return;
+  }
+  if (!MSGS) await loadMessages();
+  const chat = ((MSGS && MSGS.chats) || []).find(c => entryId(c) === focus.id);
+  if (chat) openThread(chat);
+  else switchView("dm");
+}
+async function refreshMorningBrief(button) {
+  const key = localStorage.getItem("mailbrief_key");
+  if (!key || button.disabled) return;
+  button.disabled = true;
+  button.textContent = "Refreshing…";
+  try {
+    const r = await fetch(DB + "/briefs/" + encodeURIComponent(key) + "/daily_refresh_requested.json", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Date.now()),
+    });
+    if (!r.ok) throw new Error("request rejected");
+    showToast("Refreshing your morning brief…", { state: "ok", ms: 2500 });
+    updateNow();
+    // A successful refresh replaces this card. If dispatch fails before that,
+    // restore the control so the user is never stranded on a disabled button.
+    setTimeout(() => {
+      if (button.isConnected) { button.disabled = false; button.textContent = "Refresh brief"; }
+    }, 15000);
+  } catch (_) {
+    button.disabled = false;
+    button.textContent = "Refresh brief";
+    showToast("Couldn’t refresh the morning brief — try again online", { state: "fail", ms: 4500 });
+  }
+}
+function renderDailyBrief(parent) {
+  const daily = currentDailyBrief();
+  if (!daily || SEARCH || PRIO_FILTER !== "active") return false;
+  const card = el("section", "morningBrief");
+  card.setAttribute("aria-labelledby", "morningBriefTitle");
+
+  const top = el("div", "mbTop");
+  const eyebrow = el("div", "mbEyebrow", "DAILY BRIEF · " + new Date(daily.generated_at * 1000)
+    .toLocaleDateString([], { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric" }).toUpperCase());
+  top.appendChild(eyebrow);
+  const refresh = el("button", "mbRefresh", "Refresh brief");
+  refresh.type = "button";
+  refresh.addEventListener("click", () => refreshMorningBrief(refresh));
+  top.appendChild(refresh);
+  card.appendChild(top);
+
+  const hour = pacificHour();
+  const greeting = hour < 12 ? "Good morning, Gio." : hour < 18 ? "Good afternoon, Gio." : "Good evening, Gio.";
+  const title = el("h2", "mbGreeting", greeting); title.id = "morningBriefTitle"; card.appendChild(title);
+  card.appendChild(el("div", "mbHeadline", daily.headline || "Your day is ready"));
+  card.appendChild(el("p", "mbSummary", daily.summary || ""));
+
+  const counts = daily.counts || {};
+  const stats = el("div", "mbStats");
+  [[counts.replies || 0, "replies"], [counts.events || 0, "events"],
+   [counts.overdue || 0, "overdue"]].forEach(([n, label]) => {
+    const chip = el("span", "mbStat");
+    chip.appendChild(el("strong", null, String(n)));
+    chip.appendChild(document.createTextNode(" " + label));
+    stats.appendChild(chip);
+  });
+  card.appendChild(stats);
+
+  const focus = Array.isArray(daily.focus) ? daily.focus : [];
+  if (focus.length) {
+    card.appendChild(el("div", "mbSectionTitle", "START HERE"));
+    const list = el("div", "mbFocus");
+    focus.forEach((f, idx) => {
+      const row = el("button", "mbFocusRow"); row.type = "button";
+      row.setAttribute("aria-label", "Open " + (f.title || "priority") + " from " + (f.source || "source"));
+      row.appendChild(el("span", "mbRank", String(idx + 1)));
+      const copy = el("span", "mbFocusCopy");
+      copy.appendChild(el("span", "mbFocusTitle", f.title || "Needs attention"));
+      copy.appendChild(el("span", "mbFocusMeta", (f.source || "") +
+        (f.reason ? " · " + f.reason : "") + (f.channel ? " · " + f.channel : "")));
+      row.appendChild(copy);
+      row.appendChild(el("span", "mbArrow", "›"));
+      row.addEventListener("click", () => openDailyFocus(f));
+      list.appendChild(row);
+    });
+    card.appendChild(list);
+  }
+
+  const schedule = Array.isArray(daily.schedule) ? daily.schedule : [];
+  if (schedule.length) {
+    card.appendChild(el("div", "mbSectionTitle", "TODAY"));
+    const agenda = el("div", "mbAgenda");
+    schedule.slice(0, 3).forEach(event => {
+      const row = el("div", "mbEvent");
+      row.appendChild(el("span", "mbEventTime", dailyEventTime(event)));
+      const copy = el("span", "mbEventCopy");
+      copy.appendChild(el("span", "mbEventTitle", event.title || "(busy)"));
+      if (event.location) copy.appendChild(el("span", "mbEventLocation", event.location));
+      row.appendChild(copy);
+      agenda.appendChild(row);
+    });
+    card.appendChild(agenda);
+  }
+
+  card.appendChild(el("div", "mbPrepared", "Prepared " + new Date(daily.generated_at * 1000)
+    .toLocaleTimeString([], { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" }) + " PT"));
+  parent.appendChild(card);
+  return true;
+}
+
 function normalizeBreakingNews(data) {
   const rows = Array.isArray(data)
     ? data
@@ -976,7 +1108,11 @@ function renderDeskPane() {
 
 // ===== Pin / Snooze (synced to the DB so they carry across devices) =====
 function entryId(e) {
-  const raw = e && e.msgid ? "mail:" + e.msgid : (e && e.id ? "msg:" + e.id : "");
+  let raw = "";
+  if (e && (e.msgid || e.from_email)) {
+    const mailKey = e.msgid || [e.from_email || "", e.subject || "", e.ts || ""].join("|");
+    raw = "mail:" + mailKey;
+  } else if (e && e.id) raw = "msg:" + e.id;
   return raw ? raw.replace(/[.#$\[\]\/]/g, "_") : null; // sanitize for a DB key
 }
 function flagOf(id) { return (id && FLAGS[id]) || {}; }
@@ -1238,8 +1374,10 @@ function renderPriority() {
   const active = base.filter(e => !isSnoozed(e.id));
   const snoozed = base.filter(e => isSnoozed(e.id));
   renderBreakingNews();
-  renderBriefStrip(SEARCH ? [] : active.filter(e => e.kind === "mail").map(e => e.item));
+  const hasDaily = !!currentDailyBrief() && !SEARCH && PRIO_FILTER === "active";
+  renderBriefStrip(SEARCH || hasDaily ? [] : active.filter(e => e.kind === "mail").map(e => e.item));
   setBadge("prioBadge", active.length);
+  renderDailyBrief(v);
 
   // Toolbar: sort toggle (active view) + Snoozed filter.
   const tools = el("div", "prioTools");
