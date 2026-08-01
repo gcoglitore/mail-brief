@@ -79,6 +79,21 @@ Gate: the access key, checked with a timing-safe compare; 20 sends/hour cap;
 browser calls restricted to the app's origin. Replies thread correctly via
 In-Reply-To/References. Rotate the access key to revoke instantly.
 
+## Text and DM replies
+
+Open any conversation in **Texts** or **DMs** and use the reply field at the
+bottom. The browser writes each reply to a stable, retry-safe entry under
+`/briefs/<ACCESS KEY>/msg_outbox`. If the device is offline, the reply stays in
+local storage and is queued automatically after reconnecting.
+
+The Mac connector drains that queue every five minutes: iMessage/SMS replies go
+through Messages, while Signal, Slack, WhatsApp, Telegram, Instagram, Messenger,
+and other connected DMs go through Beeper. The UI says **queued** until the next
+message snapshot contains the sent reply; the Mac must be awake and the relevant
+service must be connected. Direct iMessage/SMS conversations are supported;
+local Apple group-chat replies remain disabled because `chat.db` does not expose
+a safe send target for them.
+
 ## Rotating the access key
 
 Generate a new random key, update the `MAILBRIEF_ACCESS_KEY` secret, run the

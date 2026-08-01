@@ -80,6 +80,7 @@ function makeMsgs() {
         preview: "see you at 6",
         ts: NOW - 1200,
         unread: 2,
+        sendable: true,
         messages: [
           { text: "running late?", ts: NOW - 1300, is_me: false },
           { text: "map here www.example.com/spot see you at 6", ts: NOW - 1200, is_me: false },
@@ -93,6 +94,7 @@ function makeMsgs() {
         ts: NOW - 4000,
         unread: 1,
         group: true,
+        sendable: true,
         messages: [{ text: "deploy done", ts: NOW - 4000, is_me: false, sender: "Priya" }],
       },
     ],
@@ -112,6 +114,7 @@ async function mockBackend(page, state) {
     if (m === "GET" && p.endsWith("/settings.json")) return route.fulfill({ json: state.settings });
     if (m === "GET" && p.endsWith("/flags.json")) return route.fulfill({ json: state.flags });
     if (m === "GET" && p.endsWith("/news.json")) return route.fulfill({ json: state.news });
+    if (m === "PUT" && p.includes("/msg_outbox/") && state.msgQueueOffline) return route.abort("failed");
     // Any write (flags PUT, subs POST, msg_outbox POST, settings PUT) just succeeds.
     return route.fulfill({ json: { ok: true, name: "k1" } });
   });
@@ -134,7 +137,7 @@ async function mockBackend(page, state) {
 // Sign in with a mocked backend and wait until the app has painted.
 async function signIn(page, overrides) {
   const state = Object.assign(
-    { brief: makeBrief(), news: makeNews(), msgs: makeMsgs(), settings: { group_threads: true }, flags: {}, apiOffline: false },
+    { brief: makeBrief(), news: makeNews(), msgs: makeMsgs(), settings: { group_threads: true }, flags: {}, apiOffline: false, msgQueueOffline: false },
     overrides
   );
   await mockBackend(page, state);

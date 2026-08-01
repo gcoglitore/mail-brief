@@ -1308,7 +1308,8 @@ function priorityMsgRow(c) {
   const row = el("article", "chat" + (isPinned(id) ? " pinned" : ""));
   const open = el("button", "chatOpen");
   open.type = "button";
-  open.setAttribute("aria-label", "Open conversation with " + (c.title || "unknown contact"));
+  open.setAttribute("aria-label", (chatCanReply(c) ? "Open and reply to " : "Open conversation with ") +
+    (c.title || "unknown contact") + " via " + chatNetworkName(c));
   open.appendChild(el("span", "net " + netClass(c.network), netLabel(c.network)));
   const mid = el("div", "chatMid");
   const title = el("div", "chatTitle", c.title || "(no title)");
@@ -1320,6 +1321,7 @@ function priorityMsgRow(c) {
   right.appendChild(el("div", "chatAgo", c.ts ? ago(c.ts) : ""));
   if (isOverdue(c.ts)) right.appendChild(el("div", "overduePill", "OVERDUE"));
   if (c.unread > 0) right.appendChild(el("div", "chatUnread", String(c.unread)));
+  if (chatCanReply(c)) right.appendChild(el("div", "chatReplyHint", "Reply"));
   open.appendChild(right);
   open.addEventListener("click", () => openThread(c));
   row.appendChild(open);
@@ -1688,6 +1690,104 @@ function netLabel(n) {
   return (n || "CHAT").toUpperCase().slice(0, 8);
 }
 
+const MSG_REPLY_QUEUE_KEY = "mailbrief_msg_reply_queue";
+let msgReplyFlushing = false;
+function chatCanReply(c) { return !!(c && c.id) && c.sendable !== false; }
+function chatNetworkName(c) {
+  const n = netClass(c && c.network);
+  return ({
+    imessage: "iMessage", sms: "SMS", signal: "Signal", slack: "Slack",
+    whatsapp: "WhatsApp", telegram: "Telegram", instagram: "Instagram",
+    twitter: "X", discord: "Discord", messenger: "Messenger", facebook: "Messenger",
+  })[n] || netLabel(c && c.network);
+}
+function loadMsgReplyQueue() {
+  try {
+    const q = JSON.parse(localStorage.getItem(MSG_REPLY_QUEUE_KEY) || "[]");
+    return Array.isArray(q) ? q.filter(x => x && x.id && x.chatID && x.text) : [];
+  } catch (_) { return []; }
+}
+function saveMsgReplyQueue(q) {
+  try { localStorage.setItem(MSG_REPLY_QUEUE_KEY, JSON.stringify(q)); } catch (_) {}
+}
+function msgReplyID() {
+  const rand = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2))
+    .replace(/[^a-zA-Z0-9_-]/g, "");
+  return "web_" + Date.now() + "_" + rand;
+}
+function replyWasSynced(entry) {
+  if (entry.state !== "queued") return false;
+  const chat = ((MSGS && MSGS.chats) || []).find(c => c.id === entry.chatID);
+  if (!chat) return false;
+  return (chat.messages || []).some(m => m.is_me && m.text === entry.text &&
+    Number(m.ts || 0) * 1000 >= Number(entry.at || 0) - 120000);
+}
+function reconcileMsgReplyQueue() {
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const before = loadMsgReplyQueue();
+  // Never discard a reply that has not reached Firebase. Once it is safely
+  // queued, keep its optimistic bubble for up to a week while awaiting a synced
+  // copy from Messages/Beeper.
+  const after = before.filter(entry => !replyWasSynced(entry) &&
+    (entry.state !== "queued" || Number(entry.at || 0) >= cutoff));
+  if (after.length !== before.length) saveMsgReplyQueue(after);
+}
+function replyStateText(entry) {
+  return entry.state === "queued"
+    ? "Queued for your Mac · usually sends within 5 min"
+    : "Saved on this device · sends when you reconnect";
+}
+function appendPendingReply(body, entry) {
+  const b = el("div", "bub me pending");
+  b.dataset.clientId = entry.id;
+  b.appendChild(document.createTextNode(entry.text));
+  b.appendChild(el("div", "bubTime", replyStateText(entry)));
+  body.appendChild(b);
+}
+function renderPendingReplies(c, body) {
+  loadMsgReplyQueue().filter(entry => entry.chatID === c.id).forEach(entry => appendPendingReply(body, entry));
+}
+function updatePendingReply(entry) {
+  const b = document.querySelector('.bub[data-client-id="' + CSS.escape(entry.id) + '"]');
+  if (b) {
+    const stamp = b.querySelector(".bubTime");
+    if (stamp) stamp.textContent = replyStateText(entry);
+  }
+  if (threadChat && threadChat.id === entry.chatID) $("threadStatus").textContent = replyStateText(entry) + ".";
+}
+async function flushMsgReplyQueue() {
+  if (msgReplyFlushing || !navigator.onLine) return;
+  const key = localStorage.getItem("mailbrief_key");
+  if (!key) return;
+  msgReplyFlushing = true;
+  try {
+    while (true) {
+      const pending = loadMsgReplyQueue().filter(entry => entry.state !== "queued");
+      if (!pending.length) break;
+      let progressed = false;
+      for (const entry of pending) {
+        try {
+          // A stable PUT path makes retries idempotent if the connection drops after
+          // Firebase accepted the write but before the browser received its response.
+          const r = await fetch(DB + "/briefs/" + encodeURIComponent(key) +
+            "/msg_outbox/" + encodeURIComponent(entry.id) + ".json", {
+            method: "PUT", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chatID: entry.chatID, text: entry.text, at: entry.at }),
+          });
+          if (!r.ok) throw new Error("queue rejected");
+          const latest = loadMsgReplyQueue();
+          const saved = latest.find(x => x.id === entry.id);
+          if (saved) { saved.state = "queued"; saveMsgReplyQueue(latest); updatePendingReply(saved); }
+          progressed = true;
+        } catch (_) {
+          updatePendingReply(entry); // remains local and will retry on reconnect/reload
+        }
+      }
+      if (!progressed) break;
+    }
+  } finally { msgReplyFlushing = false; }
+}
+
 async function loadMessages() {
   const key = localStorage.getItem("mailbrief_key");
   if (!key) return;
@@ -1699,10 +1799,12 @@ async function loadMessages() {
     const c = localStorage.getItem("mailbrief_msgs");
     if (c && !MSGS) { try { MSGS = JSON.parse(c); } catch (_) {} }
   }
+  reconcileMsgReplyQueue();
   renderMessages();
   updateMsgBadges();
   if (VIEW === "priority") renderPriority();  // messages feed the unified rail
   renderDeskPane();
+  flushMsgReplyQueue();
 }
 
 function setBadge(id, n) {
@@ -1760,17 +1862,23 @@ function renderMessages() {
     v.appendChild(tools);
   }
   chats.forEach(c => {
-    const row = el("div", "chat");
-    row.appendChild(el("span", "net " + netClass(c.network), netLabel(c.network)));
+    const row = el("article", "chat");
+    const open = el("button", "chatOpen");
+    open.type = "button";
+    open.setAttribute("aria-label", (chatCanReply(c) ? "Open and reply to " : "Open conversation with ") +
+      (c.title || "unknown contact") + " via " + chatNetworkName(c));
+    open.appendChild(el("span", "net " + netClass(c.network), netLabel(c.network)));
     const mid = el("div", "chatMid");
     mid.appendChild(el("div", "chatTitle", c.title || "(no title)"));
     mid.appendChild(el("div", "chatPrev", c.preview || ""));
-    row.appendChild(mid);
+    open.appendChild(mid);
     const right = el("div", "chatRight");
     right.appendChild(el("div", "chatAgo", c.ts ? ago(c.ts) : ""));
     if (c.unread > 0) right.appendChild(el("div", "chatUnread", String(c.unread)));
-    row.appendChild(right);
-    row.addEventListener("click", () => openThread(c));
+    if (chatCanReply(c)) right.appendChild(el("div", "chatReplyHint", "Reply"));
+    open.appendChild(right);
+    open.addEventListener("click", () => openThread(c));
+    row.appendChild(open);
     v.appendChild(row);
   });
 }
@@ -1813,12 +1921,32 @@ function markAllMessagesRead() {
   updateMsgBadges();
 }
 
+let threadTrigger = null;
 function openThread(c) {
+  threadTrigger = document.activeElement;
   threadChat = c;
   markChatRead(c);
   $("threadNet").textContent = netLabel(c.network);
   $("threadNet").className = "net " + netClass(c.network);
   $("threadTitle").textContent = c.title || "(no title)";
+  const canReply = chatCanReply(c);
+  const compose = $("threadCompose");
+  const inp = $("threadInput");
+  compose.classList.toggle("unavailable", !canReply);
+  inp.disabled = !canReply;
+  $("threadSend").disabled = !canReply;
+  inp.value = "";
+  inp.placeholder = "Reply to " + (c.title || "this conversation") + "…";
+  inp.setAttribute("aria-label", "Reply to " + (c.title || "this conversation") + " via " + chatNetworkName(c));
+  $("threadReplyHint").textContent = canReply
+    ? "Reply to " + (c.title || "this conversation") + " via " + chatNetworkName(c)
+    : "Replies are not available for this " + chatNetworkName(c) + " conversation.";
+  const waiting = loadMsgReplyQueue().filter(entry => entry.chatID === c.id);
+  const local = waiting.filter(entry => entry.state !== "queued").length;
+  $("threadStatus").textContent = !canReply ? ""
+    : local ? local + (local === 1 ? " reply is" : " replies are") + " saved on this device."
+    : waiting.length ? waiting.length + (waiting.length === 1 ? " reply is" : " replies are") + " waiting for your Mac."
+    : "Replies send securely from your Mac, usually within 5 minutes.";
   const body = $("threadBody");
   body.replaceChildren();
   (c.messages || []).forEach(m => {
@@ -1828,34 +1956,44 @@ function openThread(c) {
     b.appendChild(el("div", "bubTime", m.ts ? ago(m.ts) + " ago" : ""));
     body.appendChild(b);
   });
+  renderPendingReplies(c, body);
   $("thread").classList.add("open");
-  setTimeout(() => { body.scrollTop = body.scrollHeight; }, 40);
+  setTimeout(() => { body.scrollTop = body.scrollHeight; $("threadBack").focus(); }, 40);
 }
 
-function closeThread() { $("thread").classList.remove("open"); threadChat = null; renderDeskPane(); }
+function closeThread() {
+  if (!$("thread").classList.contains("open")) return;
+  $("thread").classList.remove("open");
+  threadChat = null;
+  renderDeskPane();
+  const trigger = threadTrigger;
+  threadTrigger = null;
+  if (trigger && trigger.isConnected) trigger.focus();
+}
 
 async function sendMessage() {
-  if (!threadChat) return;
+  if (!threadChat || !chatCanReply(threadChat)) return;
   const inp = $("threadInput");
   const text = inp.value.trim();
   if (!text) return;
-  const key = localStorage.getItem("mailbrief_key");
+  const chat = threadChat;
+  const entry = { id: msgReplyID(), chatID: chat.id, text, at: Date.now(), state: "local" };
+  const queue = loadMsgReplyQueue();
+  queue.push(entry);
+  saveMsgReplyQueue(queue);
   const body = $("threadBody");
-  const b = el("div", "bub me");
-  b.appendChild(document.createTextNode(text));
-  const stamp = el("div", "bubTime", "sending…");
-  b.appendChild(stamp);
-  body.appendChild(b);
+  appendPendingReply(body, entry);
   body.scrollTop = body.scrollHeight;
   inp.value = "";
-  try {
-    const r = await fetch(DB + "/briefs/" + encodeURIComponent(key) + "/msg_outbox.json", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatID: threadChat.id, text: text, at: Date.now() }),
-    });
-    stamp.textContent = r.ok ? "queued ✓ — sends from your Mac" : "failed";
-  } catch (e) {
-    stamp.textContent = "offline — will send when connected";
+  $("threadStatus").textContent = "Saving reply…";
+  $("threadSend").disabled = true;
+  chat.preview = "You: " + text.slice(0, 135);
+  chat.ts = Math.floor(entry.at / 1000);
+  try { localStorage.setItem("mailbrief_msgs", JSON.stringify(MSGS)); } catch (_) {}
+  await flushMsgReplyQueue();
+  if (threadChat && threadChat.id === chat.id) {
+    $("threadSend").disabled = false;
+    inp.focus();
   }
 }
 
@@ -1941,6 +2079,7 @@ document.addEventListener("keydown", e => {
 $("threadBack").addEventListener("click", closeThread);
 $("threadSend").addEventListener("click", sendMessage);
 $("threadInput").addEventListener("keydown", e => { if (e.key === "Enter") sendMessage(); });
+$("thread").addEventListener("keydown", e => trapTab($("thread"), e));
 (function () {
   const t = $("thread");
   let sx = 0, sy = 0, tracking = false;
@@ -1974,6 +2113,7 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("online", () => {
   updateNetBar(false);
+  flushMsgReplyQueue();
   const k = localStorage.getItem("mailbrief_key");
   // A signed-in load already flushes after it finishes refreshing status. Do
   // not start a competing flush here or the later refresh can erase "sent".

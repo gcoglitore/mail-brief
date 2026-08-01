@@ -40,7 +40,7 @@ test("email and conversation rows open from the keyboard", async ({ page }) => {
   await expect(page.locator("#reader")).toBeVisible();
   await page.locator("#readerBack").click();
 
-  const chat = page.getByRole("button", { name: "Open conversation with Sarah" });
+  const chat = page.getByRole("button", { name: "Open and reply to Sarah via iMessage" });
   await chat.focus();
   await page.keyboard.press("Enter");
   await expect(page.locator("#thread")).toHaveClass(/open/);

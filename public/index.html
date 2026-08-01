@@ -62,7 +62,7 @@
   </div>
 </div>
 
-<div id="thread">
+<div id="thread" role="dialog" aria-modal="true" aria-labelledby="threadTitle">
   <div id="threadHead">
     <button id="threadBack">‹ Back</button>
     <span class="acct" id="threadNet"></span>
@@ -70,8 +70,12 @@
   </div>
   <div id="threadBody"></div>
   <div id="threadCompose">
-    <input id="threadInput" type="text" placeholder="Message…" aria-label="Message">
-    <button id="threadSend">Send</button>
+    <div id="threadReplyHint"></div>
+    <div id="threadComposeRow">
+      <input id="threadInput" type="text" placeholder="Write a reply…" aria-label="Reply" maxlength="2000" autocomplete="off" enterkeyhint="send">
+      <button id="threadSend">Send</button>
+    </div>
+    <div id="threadStatus" role="status" aria-live="polite"></div>
   </div>
 </div>
 

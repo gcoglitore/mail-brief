@@ -148,7 +148,8 @@ def build_beeper_chats(token):
         msgs.sort(key=lambda x: x["ts"])
         last = msgs[-1] if msgs else {}
         out.append({"id": cid, "network": c.get("network") or "", "title": c.get("title") or "(no title)",
-                    "group": c.get("type") == "group", "unread": int(c.get("unreadCount") or 0),
+                    "group": c.get("type") == "group", "sendable": True,
+                    "unread": int(c.get("unreadCount") or 0),
                     "ts": iso_epoch(c.get("lastActivity")) or last.get("ts", 0),
                     "preview": ((("You: " if last.get("is_me") else "") + (last.get("text") or "")).strip() or "(no text)")[:140],
                     "messages": msgs})
