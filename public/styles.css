@@ -2,7 +2,9 @@
     --bg: #0b0f14; --panel: #121922; --panel2: #0f141c; --line: #1f2a37;
     --text: #e6edf3; --dim: #8b98a5; --faint: #5c6773;
     --gold: #d4a843; --red: #e0564f; --blue: #4a86e8; --green: #3fb37f;
-    --list-w: 500px; /* width of the list column in the desktop two-pane layout */
+    --list-w: clamp(350px, 26vw, 400px); /* compact Mac rail leaves room for the centered preview */
+    --preview-w: 1040px;
+    --preview-gutter: clamp(28px, 4vw, 58px);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -597,13 +599,19 @@
       min-width: 15px; height: 15px; line-height: 15px; padding: 0 4px; font-size: 9.5px; }
     .wrap { padding-bottom: 76px; }  /* clear the fixed bar */
   }
-  /* ---- Desktop two-pane layout (wide screens only; phone view untouched) ---- */
-  /* Two-pane only once signed in — the login stays centered full-viewport. */
+  /* ---- Mac reading layout (wide screens only; phone view untouched) ---- */
+  /* Keep a compact inbox rail and use the rest as a centered, wider reading canvas. */
   @media (min-width: 980px) {
     body.signed-in .wrap { max-width: var(--list-w); margin: 0; min-height: 100vh;
-      border-right: 1px solid var(--line); padding: 22px 22px 60px 30px; }
+      border-right: 1px solid var(--line); padding: 22px 18px 60px 22px; }
     body.signed-in #reader, body.signed-in #thread { left: var(--list-w); }
-    #readerInner { max-width: 680px; }
+    #readerInner { width: 100%; max-width: var(--preview-w);
+      padding: 28px var(--preview-gutter) 56px; }
+    #threadHead, #threadBody, #threadCompose { width: 100%; max-width: var(--preview-w); margin-left: auto; margin-right: auto; }
+    #threadHead { padding: 22px var(--preview-gutter) 12px; }
+    #threadBody { padding: 20px var(--preview-gutter); }
+    #threadCompose { padding: 12px var(--preview-gutter) 18px; }
+    #deskPane .dpInner { max-width: 520px; }
     body.signed-in #deskPane { display: flex; flex-direction: column; }
   }
   #threadSend { padding: 0 18px; border: 0; border-radius: 999px; background: var(--gold);
