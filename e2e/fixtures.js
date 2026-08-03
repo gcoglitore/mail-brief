@@ -29,15 +29,30 @@ function makeBrief() {
       generated_at: NOW - 120,
       headline: "3 replies and 2 events shape today",
       summary: "Start with Sign term sheet, page 4. Your calendar has 2 events.",
-      counts: { mail: 2, replies: 3, conversations: 2, events: 2, overdue: 1 },
+      counts: { mail: 2, replies: 3, conversations: 2, events: 2, overdue: 1, important_unread: 2, attention: 2 },
       focus: [
         { kind: "mail", id: "mail:m1@x", title: "Sign term sheet, page 4", source: "Dana Investor", channel: "QLAD", reason: "Reply needed", ts: NOW - 3 * 86400 },
         { kind: "message", id: "msg:c1", title: "see you at 6", source: "Sarah", channel: "imessage", reason: "2 unread", ts: NOW - 1200 },
+      ],
+      important_unread: [
+        { kind: "mail", id: "mail:m1@x", title: "Term sheet — sign by Friday?", source: "Dana Investor", channel: "QLAD", reason: "Reply needed", ts: NOW - 3 * 86400 },
+        { kind: "mail", id: "mail:m2@x", title: "Nightly report", source: "Bob Ops", channel: "QLAD", reason: "Unread priority", ts: NOW - 3600 },
       ],
       schedule: [
         { title: "Standup", start: NOW - 600, end: NOW + 600, location: "", all_day: false },
         { title: "Board call", start: NOW + 3600, end: NOW + 5400, location: "Zoom", all_day: false },
       ],
+      news: {
+        generated_at: NOW - 120,
+        national: [
+          { title: "Congress advances a major infrastructure package", source: "AP News", url: "https://news.google.com/articles/us-1", published_at: NOW - 900 },
+          { title: "States prepare for a new round of severe weather", source: "NPR", url: "https://news.google.com/articles/us-2", published_at: NOW - 1800 },
+        ],
+        international: [
+          { title: "Global leaders meet for renewed ceasefire talks", source: "BBC", url: "https://news.google.com/articles/world-1", published_at: NOW - 1200 },
+          { title: "Markets react to the latest central-bank decision", source: "Reuters", url: "https://news.google.com/articles/world-2", published_at: NOW - 2400 },
+        ],
+      },
     },
     items: [
       {
@@ -68,7 +83,7 @@ function makeBrief() {
         snippet: "All systems green.",
         body: "All systems green overnight.",
         ts: NOW - 3600,
-        unread: false,
+        unread: true,
         bucket: "attention",
         msgid: "m2@x",
         reply_to: "bob@ops.com",

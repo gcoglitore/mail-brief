@@ -24,6 +24,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 DB_URL = "https://mail-brief-gio-default-rtdb.firebaseio.com"
@@ -33,6 +34,11 @@ SNIPPET_LEN = 180
 BODY_LEN = 2500  # readable-text cap after quote/signature stripping; junk carries none
 PACIFIC = ZoneInfo("America/Los_Angeles")
 MORNING_BRIEF_HOUR = 7
+NEWS_FEEDS = {
+    "national": "https://news.google.com/rss/headlines/section/topic/NATION?hl=en-US&gl=US&ceid=US:en",
+    "international": "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en",
+}
+MAX_NEWS_PER_SECTION = 3
 
 JUNK_DOMAINS = (
     "goalphalabs.com", "orbitz.com", "reply.ebay.com", "learn.heygen.com",
@@ -483,10 +489,83 @@ def _today_events(calendar, local_now):
                 "location": (event.get("location") or "")[:120],
                 "all_day": bool(event.get("all_day")),
             })
-    return sorted(out, key=lambda e: e["start"])[:4]
+    return sorted(out, key=lambda e: e["start"])[:6]
 
 
-def build_daily_brief(items, calendar, messages=None, flags=None, now=None):
+def _headline_timestamp(value, fallback):
+    try:
+        parsed = email.utils.parsedate_to_datetime(value or "")
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        return int(parsed.timestamp())
+    except Exception:
+        return fallback
+
+
+def _parse_news_feed(payload, now, limit=MAX_NEWS_PER_SECTION):
+    """Parse a Google News RSS topic into a small, publisher-attributed list."""
+    root = ET.fromstring(payload)
+    candidates = []
+    seen_titles = set()
+    for item in root.findall(".//item"):
+        raw_title = " ".join((item.findtext("title") or "").split())
+        source = " ".join((item.findtext("source") or "").split())[:80]
+        url = (item.findtext("link") or "").strip()
+        if not raw_title or not source or not url.startswith("https://news.google.com/"):
+            continue
+        suffix = " - " + source
+        title = raw_title[:-len(suffix)] if raw_title.endswith(suffix) else raw_title
+        title = title.strip()[:180]
+        key = re.sub(r"\W+", " ", title.lower()).strip()
+        if not key or key in seen_titles:
+            continue
+        seen_titles.add(key)
+        candidates.append({
+            "title": title,
+            "source": source,
+            "url": url[:1200],
+            "published_at": _headline_timestamp(item.findtext("pubDate"), now),
+        })
+    rows = []
+    seen_sources = set()
+    for row in candidates:
+        source_key = row["source"].lower()
+        if source_key in seen_sources:
+            continue
+        rows.append(row)
+        seen_sources.add(source_key)
+        if len(rows) >= limit:
+            return rows
+    # A thin feed is still more useful than an artificially short brief.
+    for row in candidates:
+        if row not in rows:
+            rows.append(row)
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def fetch_top_headlines(now=None, opener=None):
+    """Fetch independent U.S. and world headline sections without risking mail refresh."""
+    now = int(now or time.time())
+    opener = opener or urllib.request.urlopen
+    result = {"generated_at": now, "national": [], "international": []}
+    for section, url in NEWS_FEEDS.items():
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "MailBrief/1.0"})
+            with opener(req, timeout=15) as resp:
+                result[section] = _parse_news_feed(resp.read(), now)
+            print(f"Headlines: {len(result[section])} {section}")
+        except Exception as exc:
+            print(f"Headlines: {section} unavailable ({str(exc)[:100]})")
+    return result
+
+
+def _news_has_items(news):
+    return isinstance(news, dict) and bool(news.get("national") or news.get("international"))
+
+
+def build_daily_brief(items, calendar, messages=None, flags=None, news=None, now=None):
     """Create one compact, source-backed morning plan from all inbox channels.
 
     The brief deliberately stores references and short action labels, not copied
@@ -497,6 +576,7 @@ def build_daily_brief(items, calendar, messages=None, flags=None, now=None):
     local_now = pacific_date(now)
     flags = flags if isinstance(flags, dict) else {}
     candidates = []
+    important_unread = []
     mail_count = 0
     mail_replies = 0
     overdue = 0
@@ -531,6 +611,16 @@ def build_daily_brief(items, calendar, messages=None, flags=None, now=None):
             "channel": (item.get("account") or "Mail")[:40],
             "reason": reason, "ts": int(item.get("ts") or 0), "_rank": rank,
         })
+        if item.get("unread"):
+            important_unread.append({
+                "kind": "mail", "id": eid,
+                "title": (item.get("subject") or item.get("action_summary") or "Important unread email")[:120],
+                "source": (item.get("from_name") or item.get("from_email") or "Email")[:80],
+                "channel": (item.get("account") or "Mail")[:40],
+                "reason": reason, "ts": int(item.get("ts") or 0),
+                "_rank": 0 if flag.get("pin") else 1 if needs_reply else 2 if sig.get("doc")
+                else 3 if sig.get("meeting") else 4,
+            })
 
     chats = (messages or {}).get("chats", []) if isinstance(messages, dict) else []
     conversation_count = 0
@@ -559,18 +649,25 @@ def build_daily_brief(items, calendar, messages=None, flags=None, now=None):
     # Within the same action tier, the oldest waiting item comes first.
     candidates.sort(key=lambda x: (x["_rank"], x["ts"] or now))
     focus = []
-    for row in candidates[:3]:
+    for row in candidates[:4]:
         row = dict(row)
         row.pop("_rank", None)
         focus.append(row)
 
+    important_unread.sort(key=lambda x: (x["_rank"], -(x["ts"] or 0)))
+    unread_rows = []
+    for row in important_unread[:4]:
+        row = dict(row)
+        row.pop("_rank", None)
+        unread_rows.append(row)
+
     schedule = _today_events(calendar, local_now)
     reply_total = mail_replies + conversation_count
-    if reply_total and schedule:
-        headline = f"{reply_total} {'reply' if reply_total == 1 else 'replies'} and {len(schedule)} " \
-                   f"{'event' if len(schedule) == 1 else 'events'} shape today"
-    elif reply_total:
-        headline = f"{reply_total} {'reply needs' if reply_total == 1 else 'replies need'} you today"
+    if focus and schedule:
+        headline = f"{len(focus)} {'action' if len(focus) == 1 else 'actions'}, {len(unread_rows)} unread, and " \
+                   f"{len(schedule)} {'event' if len(schedule) == 1 else 'events'} today"
+    elif focus:
+        headline = f"{len(focus)} {'item needs' if len(focus) == 1 else 'items need'} your attention today"
     elif schedule:
         headline = f"{len(schedule)} {'event' if len(schedule) == 1 else 'events'} on your calendar today"
     elif focus:
@@ -579,10 +676,12 @@ def build_daily_brief(items, calendar, messages=None, flags=None, now=None):
         headline = "You're clear for today"
 
     if focus:
-        summary = "Start with " + focus[0]["title"].rstrip(". ") + "."
+        summary = "First up: " + focus[0]["title"].rstrip(". ") + "."
         if schedule:
             summary += " Your calendar has " + str(len(schedule)) + \
                        (" event." if len(schedule) == 1 else " events.")
+        if _news_has_items(news):
+            summary += " U.S. and world headlines are ready below."
     elif schedule:
         summary = "Your inbox is quiet; the day is organized around your calendar."
     else:
@@ -600,9 +699,13 @@ def build_daily_brief(items, calendar, messages=None, flags=None, now=None):
             "conversations": conversation_count,
             "events": len(schedule),
             "overdue": overdue,
+            "important_unread": len(unread_rows),
+            "attention": len(focus),
         },
         "focus": focus,
+        "important_unread": unread_rows,
         "schedule": schedule,
+        "news": news if isinstance(news, dict) else {"generated_at": now, "national": [], "international": []},
     }
 
 
@@ -819,7 +922,16 @@ def main():
             flags = db_get(f"/briefs/{key}/flags.json", token) or {}
         except Exception:
             flags = {}
-        daily_brief = build_daily_brief(all_items, calendar, message_snapshot, flags)
+        news_snapshot = fetch_top_headlines()
+        # A manual same-day refresh may reuse its still-current headlines when
+        # both remote topic feeds are briefly unavailable.
+        previous_news = previous_daily.get("news") if isinstance(previous_daily, dict) else None
+        if not _news_has_items(news_snapshot) and _news_has_items(previous_news) and \
+                int(time.time()) - int(previous_news.get("generated_at") or 0) < 12 * 3600:
+            news_snapshot = previous_news
+            print("Headlines: kept the previous same-day snapshot")
+        daily_brief = build_daily_brief(
+            all_items, calendar, message_snapshot, flags, news=news_snapshot)
         daily_generated = True
         print(f"Morning brief: generated {daily_brief['date']} with "
               f"{len(daily_brief['focus'])} focus item(s) and {len(daily_brief['schedule'])} event(s)")

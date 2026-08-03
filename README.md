@@ -33,16 +33,19 @@ only the Realtime Database holds it, behind the unguessable key path.
 ## Morning brief
 
 The first successful refresh after **7:00 AM America/Los_Angeles** generates one
-source-backed daily plan from attention email, unread texts/DMs, pin/snooze
-state, and today's Google Calendar events. It includes a concise headline,
-three ranked starting points, counts, and the day's first events. Each priority
-opens the underlying email or conversation; the brief never copies full message
-bodies into a second data store.
+source-backed daily plan with distinct sections for today's Google Calendar,
+items needing attention, important unread email, and unread texts/DMs. It also
+fetches publisher-attributed U.S. and world headlines from the Google News
+`NATION` and `WORLD` RSS topics. Each mail priority opens the underlying email
+or conversation and each headline opens its coverage; the brief never copies
+full message or article bodies into a second data store.
 
 The result is saved as `brief.daily_brief` and remains stable for the day. A
 **Refresh brief** control writes a one-shot `daily_refresh_requested` timestamp
 and dispatches the normal refresh workflow. Devices with alerts enabled receive
-one morning notification; that run suppresses a redundant new-mail push.
+one morning notification; that run suppresses a redundant new-mail push. News
+feeds fail independently and a same-day manual refresh may retain the previous
+headline snapshot for up to 12 hours if both feeds are temporarily unavailable.
 
 ## Breaking-news alerts
 
