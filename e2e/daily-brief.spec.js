@@ -8,8 +8,13 @@ test("morning brief summarizes the day and opens its source items", async ({ pag
   await expect(brief).toBeVisible();
   await expect(brief.getByText(/Good (morning|afternoon|evening), Gio\./)).toBeVisible();
   await expect(brief.getByText("3 replies and 2 events shape today")).toBeVisible();
-  await expect(brief.getByText("START HERE")).toBeVisible();
+  await expect(brief.getByText("NEEDS YOUR ATTENTION")).toBeVisible();
+  await expect(brief.getByText("TODAY'S CALENDAR")).toBeVisible();
+  await expect(brief.getByText("IMPORTANT UNREAD EMAILS")).toBeVisible();
+  await expect(brief.getByText("U.S. TOP HEADLINES")).toBeVisible();
+  await expect(brief.getByText("WORLD TOP HEADLINES")).toBeVisible();
   await expect(brief.getByText("Board call")).toBeVisible();
+  await expect(brief.getByRole("link", { name: /Congress advances/ })).toHaveAttribute("href", "https://news.google.com/articles/us-1");
 
   await brief.getByRole("button", { name: /Open Sign term sheet/ }).click();
   await expect(page.locator("#readerSubject")).toHaveText("Term sheet — sign by Friday?");

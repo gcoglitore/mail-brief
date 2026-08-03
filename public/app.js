@@ -852,6 +852,56 @@ async function refreshMorningBrief(button) {
     showToast("Couldn’t refresh the morning brief — try again online", { state: "fail", ms: 4500 });
   }
 }
+function dailyActionList(rows, ranked) {
+  const list = el("div", "mbFocus");
+  rows.forEach((f, idx) => {
+    const row = el("button", "mbFocusRow"); row.type = "button";
+    row.setAttribute("aria-label", (ranked ? "Open " : "Open important unread email ") +
+      (f.title || "priority") + " from " + (f.source || "source"));
+    row.appendChild(el("span", ranked ? "mbRank" : "mbUnreadMark", ranked ? String(idx + 1) : "•"));
+    const copy = el("span", "mbFocusCopy");
+    copy.appendChild(el("span", "mbFocusTitle", f.title || "Needs attention"));
+    copy.appendChild(el("span", "mbFocusMeta", (f.source || "") +
+      (f.reason ? " · " + f.reason : "") + (f.channel ? " · " + f.channel : "")));
+    row.appendChild(copy);
+    row.appendChild(el("span", "mbArrow", "›"));
+    row.addEventListener("click", () => openDailyFocus(f));
+    list.appendChild(row);
+  });
+  return list;
+}
+function dailyAgenda(events) {
+  const agenda = el("div", "mbAgenda");
+  events.slice(0, 6).forEach(event => {
+    const row = el("div", "mbEvent");
+    row.appendChild(el("span", "mbEventTime", dailyEventTime(event)));
+    const copy = el("span", "mbEventCopy");
+    copy.appendChild(el("span", "mbEventTitle", event.title || "(busy)"));
+    if (event.location) copy.appendChild(el("span", "mbEventLocation", event.location));
+    row.appendChild(copy);
+    agenda.appendChild(row);
+  });
+  return agenda;
+}
+function dailyNewsList(rows) {
+  const list = el("div", "mbNewsList");
+  rows.forEach(story => {
+    const url = safeLink(story.url);
+    const row = el(url ? "a" : "div", "mbNewsRow");
+    if (url) { row.href = url; row.target = "_blank"; row.rel = "noopener noreferrer"; }
+    row.appendChild(el("span", "mbNewsTitle", story.title || "Headline"));
+    row.appendChild(el("span", "mbNewsMeta", (story.source || "News") +
+      (story.published_at ? " · " + alertAge(story.published_at) : "")));
+    list.appendChild(row);
+  });
+  return list;
+}
+function dailyBlock(title, content, extraClass) {
+  const block = el("section", "mbBlock" + (extraClass ? " " + extraClass : ""));
+  block.appendChild(el("div", "mbSectionTitle", title));
+  block.appendChild(content);
+  return block;
+}
 function renderDailyBrief(parent) {
   const daily = currentDailyBrief();
   if (!daily || SEARCH || PRIO_FILTER !== "active") return false;
@@ -876,7 +926,8 @@ function renderDailyBrief(parent) {
 
   const counts = daily.counts || {};
   const stats = el("div", "mbStats");
-  [[counts.replies || 0, "replies"], [counts.events || 0, "events"],
+  [[counts.attention == null ? (daily.focus || []).length : counts.attention, "need attention"],
+   [counts.important_unread || 0, "important unread"], [counts.events || 0, "events"],
    [counts.overdue || 0, "overdue"]].forEach(([n, label]) => {
     const chip = el("span", "mbStat");
     chip.appendChild(el("strong", null, String(n)));
@@ -886,40 +937,25 @@ function renderDailyBrief(parent) {
   card.appendChild(stats);
 
   const focus = Array.isArray(daily.focus) ? daily.focus : [];
-  if (focus.length) {
-    card.appendChild(el("div", "mbSectionTitle", "START HERE"));
-    const list = el("div", "mbFocus");
-    focus.forEach((f, idx) => {
-      const row = el("button", "mbFocusRow"); row.type = "button";
-      row.setAttribute("aria-label", "Open " + (f.title || "priority") + " from " + (f.source || "source"));
-      row.appendChild(el("span", "mbRank", String(idx + 1)));
-      const copy = el("span", "mbFocusCopy");
-      copy.appendChild(el("span", "mbFocusTitle", f.title || "Needs attention"));
-      copy.appendChild(el("span", "mbFocusMeta", (f.source || "") +
-        (f.reason ? " · " + f.reason : "") + (f.channel ? " · " + f.channel : "")));
-      row.appendChild(copy);
-      row.appendChild(el("span", "mbArrow", "›"));
-      row.addEventListener("click", () => openDailyFocus(f));
-      list.appendChild(row);
-    });
-    card.appendChild(list);
+  const schedule = Array.isArray(daily.schedule) ? daily.schedule : [];
+  const dayGrid = el("div", "mbColumns mbDayColumns");
+  if (focus.length) dayGrid.appendChild(dailyBlock("NEEDS YOUR ATTENTION", dailyActionList(focus, true)));
+  if (schedule.length) dayGrid.appendChild(dailyBlock("TODAY'S CALENDAR", dailyAgenda(schedule)));
+  if (dayGrid.childNodes.length) card.appendChild(dayGrid);
+
+  const importantUnread = Array.isArray(daily.important_unread) ? daily.important_unread : [];
+  if (importantUnread.length) {
+    card.appendChild(dailyBlock("IMPORTANT UNREAD EMAILS", dailyActionList(importantUnread, false), "mbUnreadBlock"));
   }
 
-  const schedule = Array.isArray(daily.schedule) ? daily.schedule : [];
-  if (schedule.length) {
-    card.appendChild(el("div", "mbSectionTitle", "TODAY"));
-    const agenda = el("div", "mbAgenda");
-    schedule.slice(0, 3).forEach(event => {
-      const row = el("div", "mbEvent");
-      row.appendChild(el("span", "mbEventTime", dailyEventTime(event)));
-      const copy = el("span", "mbEventCopy");
-      copy.appendChild(el("span", "mbEventTitle", event.title || "(busy)"));
-      if (event.location) copy.appendChild(el("span", "mbEventLocation", event.location));
-      row.appendChild(copy);
-      agenda.appendChild(row);
-    });
-    card.appendChild(agenda);
-  }
+  const news = daily.news && typeof daily.news === "object" ? daily.news : {};
+  const national = Array.isArray(news.national) ? news.national : [];
+  const international = Array.isArray(news.international) ? news.international : [];
+  const newsGrid = el("div", "mbColumns mbNewsColumns");
+  if (national.length) newsGrid.appendChild(dailyBlock("U.S. TOP HEADLINES", dailyNewsList(national)));
+  if (international.length) newsGrid.appendChild(dailyBlock("WORLD TOP HEADLINES", dailyNewsList(international)));
+  if (newsGrid.childNodes.length) card.appendChild(newsGrid);
+  else if (daily.news) card.appendChild(el("div", "mbNewsUnavailable", "Headlines are temporarily unavailable — refresh later."));
 
   card.appendChild(el("div", "mbPrepared", "Prepared " + new Date(daily.generated_at * 1000)
     .toLocaleTimeString([], { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" }) + " PT"));

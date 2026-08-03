@@ -37,15 +37,23 @@ class DailyBrief(unittest.TestCase):
             {"title": "Tomorrow", "start": self.now + 86400, "end": self.now + 90000,
              "location": "", "all_day": False},
         ]
+        news = {
+            "generated_at": self.now,
+            "national": [{"title": "A U.S. headline", "source": "AP", "url": "https://news.google.com/a"}],
+            "international": [{"title": "A world headline", "source": "BBC", "url": "https://news.google.com/b"}],
+        }
 
-        out = rm.build_daily_brief(items, calendar, messages, now=self.now)
+        out = rm.build_daily_brief(items, calendar, messages, news=news, now=self.now)
 
         self.assertEqual(out["date"], "2026-07-31")
         self.assertEqual(out["counts"], {"mail": 2, "replies": 2, "conversations": 1,
-                                         "events": 1, "overdue": 1})
+                                         "events": 1, "overdue": 1, "important_unread": 2,
+                                         "attention": 3})
         self.assertEqual([x["id"] for x in out["focus"][:2]], ["mail:reply@x", "msg:signal-1"])
+        self.assertEqual([x["id"] for x in out["important_unread"]], ["mail:reply@x", "mail:later@x"])
         self.assertEqual(out["schedule"][0]["title"], "Board call")
-        self.assertIn("2 replies", out["headline"])
+        self.assertEqual(out["news"], news)
+        self.assertIn("3 actions", out["headline"])
 
     def test_snoozed_items_are_left_out(self):
         items = [{"msgid": "later@x", "bucket": "attention", "from_name": "Bob",
@@ -66,6 +74,61 @@ class DailyBrief(unittest.TestCase):
         self.assertTrue(rm.should_generate_daily_brief(None, now=self.now))
         self.assertFalse(rm.should_generate_daily_brief(previous, now=self.now))
         self.assertTrue(rm.should_generate_daily_brief(previous, requested_at=self.now * 1000, now=self.now))
+
+
+class NewsHeadlines(unittest.TestCase):
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return self.payload
+
+    @staticmethod
+    def feed(*items):
+        body = "".join(
+            "<item><title>{title} - {source}</title><link>https://news.google.com/{slug}</link>"
+            "<pubDate>Fri, 31 Jul 2026 14:00:00 GMT</pubDate><source>{source}</source></item>".format(**item)
+            for item in items
+        )
+        return ("<rss><channel>" + body + "</channel></rss>").encode()
+
+    def test_fetches_publisher_attributed_national_and_world_news(self):
+        nation = self.feed(
+            {"title": "National lead", "source": "AP", "slug": "n1"},
+            {"title": "Second lead", "source": "NPR", "slug": "n2"},
+        )
+        world = self.feed({"title": "World lead", "source": "BBC", "slug": "w1"})
+
+        def opener(req, timeout):
+            self.assertEqual(timeout, 15)
+            return self.Response(world if "WORLD" in req.full_url else nation)
+
+        out = rm.fetch_top_headlines(now=1785507000, opener=opener)
+
+        self.assertEqual([x["title"] for x in out["national"]], ["National lead", "Second lead"])
+        self.assertEqual(out["national"][0]["source"], "AP")
+        self.assertEqual(out["international"][0]["title"], "World lead")
+        self.assertGreater(out["national"][0]["published_at"], 0)
+
+    def test_one_failed_topic_does_not_erase_the_other(self):
+        nation = self.feed({"title": "National lead", "source": "AP", "slug": "n1"})
+
+        def opener(req, timeout):
+            if "WORLD" in req.full_url:
+                raise OSError("offline")
+            return self.Response(nation)
+
+        out = rm.fetch_top_headlines(now=1785507000, opener=opener)
+
+        self.assertEqual(len(out["national"]), 1)
+        self.assertEqual(out["international"], [])
 
 
 class HtmlToText(unittest.TestCase):
