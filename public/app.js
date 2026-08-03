@@ -269,9 +269,27 @@ function card(i, cls) {
 
   // Primary line — the requested action, dominant (gold when AI-summarized)
   opener.appendChild(el("div", "cPrimary" + (i.action_summary ? " act" : ""), i.action_summary || i.subject || "(no subject)"));
-  // Secondary line — quieter context (subject, or snippet when no summary)
+  // Secondary line — preserve the original subject under an AI action cue;
+  // ordinary phone rows keep their existing one-line snippet here.
   const secondary = i.action_summary ? (i.subject || "") : (i.snippet || "");
   if (secondary) opener.appendChild(el("div", "cSecondary", secondary));
+
+  // Wide-screen preview — show the actual message context instead of making
+  // the user open every row to understand it. CSS keeps this hidden on phones.
+  if (i.action_summary && i.snippet) opener.appendChild(el("div", "cPreview", i.snippet));
+  const context = el("div", "cContext");
+  if (i.from_email && i.from_email !== i.from_name) {
+    context.appendChild(el("span", "cEmail", i.from_email));
+  }
+  const signals = i.signals || {};
+  if (signals.reply) context.appendChild(el("span", "cInfoChip reply", "Reply needed"));
+  const attachmentCount = Array.isArray(i.attachments) ? i.attachments.length : 0;
+  if (attachmentCount) {
+    context.appendChild(el("span", "cInfoChip", attachmentCount + " attachment" + (attachmentCount === 1 ? "" : "s")));
+  }
+  const threadCount = Number(i.thread_count) || 0;
+  if (threadCount > 1) context.appendChild(el("span", "cInfoChip", threadCount + " messages"));
+  if (context.childNodes.length) opener.appendChild(context);
   node.appendChild(opener);
 
   if (i.bucket !== "junk") {

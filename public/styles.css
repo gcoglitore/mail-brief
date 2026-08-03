@@ -3,9 +3,9 @@
     --text: #e6edf3; --dim: #8b98a5; --faint: #5c6773;
     --gold: #d4a843; --red: #e0564f; --blue: #4a86e8; --green: #3fb37f;
     --list-w: 400px;
-    --mac-feed-w: 980px;
-    --preview-w: 1040px;
-    --preview-gutter: clamp(28px, 4vw, 58px);
+    --mac-feed-w: 1180px;
+    --preview-w: 1240px;
+    --preview-gutter: clamp(36px, 4vw, 72px);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -304,6 +304,15 @@
   .cPrimary.act { color: var(--gold); }
   .cSecondary { font-size: 12.5px; color: var(--dim); margin-top: 3px;
     display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  /* The richer preview is a Mac-only progressive enhancement. Phone rows keep
+     their compact scan density while wide screens use the available canvas. */
+  .cPreview, .cContext { display: none; }
+  .cPreview { color: var(--dim); font-size: 13px; line-height: 1.5; }
+  .cContext { align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+  .cEmail { color: var(--faint); font-size: 11.5px; margin-right: 2px; }
+  .cInfoChip { padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--panel2); color: var(--dim); font-size: 10.5px; font-weight: 650; }
+  .cInfoChip.reply { color: var(--gold); border-color: rgba(212,168,67,.42); }
   .rowBtn { padding: 6px 14px; border-radius: 8px; border: 1px solid var(--line);
     background: var(--panel2); color: var(--text); font-size: 13px; font-weight: 700; cursor: pointer; }
   .rowBtn:hover { border-color: var(--gold); }
@@ -623,6 +632,13 @@
   @media (min-width: 980px) {
     body.signed-in .wrap { max-width: var(--mac-feed-w); margin: 0 auto; min-height: 100vh;
       border-right: 0; padding: 22px 30px 60px; }
+    body.signed-in .card { padding: 16px 18px; margin-bottom: 10px; }
+    body.signed-in .cPrimary { margin-top: 8px; font-size: 16px; }
+    body.signed-in .cSecondary { margin-top: 3px; font-size: 13px; -webkit-line-clamp: 2; }
+    body.signed-in .cPreview { display: -webkit-box; margin-top: 7px;
+      -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+    body.signed-in .cContext { display: flex; }
+    body.signed-in .cardFoot { margin-top: 13px; }
     body.signed-in #reader, body.signed-in #thread { left: 0; }
     #readerInner { width: 100%; max-width: var(--preview-w);
       padding: 28px var(--preview-gutter) 56px; }
