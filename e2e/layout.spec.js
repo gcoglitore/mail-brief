@@ -22,20 +22,28 @@ test("signed-in desktop centers the email feed", async ({ page }) => {
     const box = el.getBoundingClientRect();
     return { left: box.left, right: box.right, width: box.width, viewport: window.innerWidth };
   });
-  expect(feed.width).toBeGreaterThan(900);
+  expect(feed.width).toBeGreaterThan(1100);
   expect(Math.abs((feed.left + feed.right) / 2 - feed.viewport / 2)).toBeLessThanOrEqual(1);
+
+  const termSheet = page.getByRole("article").filter({ has: page.getByRole("button", { name: /Open Term sheet/ }) });
+  await expect(termSheet.locator(".cPreview")).toBeVisible();
+  await expect(termSheet.locator(".cPreview")).toContainText("review and sign page 4");
+  await expect(termSheet.locator(".cContext")).toContainText("dana@vc.com");
+  await expect(termSheet.locator(".cContext")).toContainText("Reply needed");
+  await expect(termSheet.locator(".cContext")).toContainText("1 attachment");
+  await expect(termSheet.locator(".cContext")).toContainText("2 messages");
 });
 
 test("desktop centers a wider email preview without changing the phone reader", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await signIn(page);
-  await page.getByRole("button", { name: /Open Sign term sheet/ }).click();
+  await page.getByRole("button", { name: /Open Term sheet/ }).click();
 
   const desktop = await page.evaluate(() => {
     const preview = document.querySelector("#readerInner").getBoundingClientRect();
     return { previewLeft: preview.left, previewRight: preview.right, previewWidth: preview.width };
   });
-  expect(desktop.previewWidth).toBeGreaterThan(900);
+  expect(desktop.previewWidth).toBeGreaterThan(1150);
   expect(Math.abs((desktop.previewLeft + desktop.previewRight) / 2 - 720)).toBeLessThanOrEqual(1);
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -46,4 +54,19 @@ test("desktop centers a wider email preview without changing the phone reader", 
   });
   expect(phone.readerLeft).toBe(0);
   expect(phone.previewWidth).toBeLessThanOrEqual(390);
+});
+
+test("phone keeps the richer inbox context compact", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page);
+
+  const termSheet = page.getByRole("article").filter({ has: page.getByRole("button", { name: /Open Term sheet/ }) });
+  await expect(termSheet.locator(".cPreview")).toBeHidden();
+  await expect(termSheet.locator(".cContext")).toBeHidden();
+
+  const widths = await page.evaluate(() => ({
+    client: document.documentElement.clientWidth,
+    scroll: document.documentElement.scrollWidth,
+  }));
+  expect(widths.scroll).toBe(widths.client);
 });
