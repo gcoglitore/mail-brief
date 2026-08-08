@@ -51,6 +51,8 @@ test("preference switches have accessible names and state", async ({ page }) => 
   await page.locator("#prefsBtn").click();
   const texts = page.getByRole("switch", { name: "Include Texts (iMessage / SMS)" });
   await expect(texts).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("switch", { name: "Include DMs (LinkedIn / Signal…)" }))
+    .toHaveAttribute("aria-checked", "true");
   await texts.click();
   await expect(page.getByRole("switch", { name: "Include Texts (iMessage / SMS)" }))
     .toHaveAttribute("aria-checked", "false");

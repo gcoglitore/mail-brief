@@ -35,6 +35,27 @@ test("replies to a Signal conversation from the DMs view", async ({ page }) => {
   await expect(page.getByText(/Queued for your Mac/).first()).toBeVisible();
 });
 
+test("shows and replies to a LinkedIn conversation from the DMs view", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("tab", { name: /DMs/ }).click();
+  const chat = page.getByRole("button", { name: /Open and reply to Morgan Lee via LinkedIn/ });
+  await expect(chat.getByText("LINKEDIN", { exact: true })).toBeVisible();
+  await chat.click();
+
+  await expect(page.getByText("Reply to Morgan Lee via LinkedIn", { exact: true })).toBeVisible();
+  await page.getByRole("textbox", { name: "Reply to Morgan Lee via LinkedIn", exact: true })
+    .fill("Absolutely — I’ll send it this afternoon.");
+  const write = page.waitForRequest(isReplyWrite);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+
+  const request = await write;
+  expect(request.postDataJSON()).toMatchObject({
+    chatID: "c3",
+    text: "Absolutely — I’ll send it this afternoon.",
+  });
+  await expect(page.getByText(/Queued for your Mac/).first()).toBeVisible();
+});
+
 test("keeps the mobile reply composer above the bottom navigation", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);

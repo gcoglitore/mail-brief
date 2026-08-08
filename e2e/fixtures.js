@@ -135,6 +135,16 @@ function makeMsgs() {
         sendable: true,
         messages: [{ text: "deploy done", ts: NOW - 4000, is_me: false, sender: "Priya" }],
       },
+      {
+        id: "c3",
+        network: "linkedin",
+        title: "Morgan Lee",
+        preview: "Could you send the deck?",
+        ts: NOW - 1800,
+        unread: 1,
+        sendable: true,
+        messages: [{ text: "Could you send the deck?", ts: NOW - 1800, is_me: false, sender: "Morgan Lee" }],
+      },
     ],
   };
 }
