@@ -189,7 +189,9 @@ async function signIn(page, overrides) {
     overrides
   );
   await mockBackend(page, state);
-  await page.addInitScript(() => localStorage.setItem("mailbrief_key", "testkey"));
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem("mailbrief_skip_test_key")) localStorage.setItem("mailbrief_key", "testkey");
+  });
   await page.goto("/");
   await page.waitForSelector("body.signed-in");
   return state; // mutate state.apiOffline mid-test to toggle connectivity

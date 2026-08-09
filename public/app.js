@@ -1889,7 +1889,21 @@ $("keyReveal").addEventListener("click", () => {
   $("keyReveal").setAttribute("aria-pressed", String(show));
   inp.focus();
 });
-$("lockBtn").addEventListener("click", () => { localStorage.removeItem("mailbrief_key"); location.reload(); });
+const PRIVATE_LOCAL_KEYS = [
+  "mailbrief_key", "mailbrief_cache", "mailbrief_msgs", "mailbrief_flags",
+  "mailbrief_news_cache", "mailbrief_outbox", "mailbrief_msg_reply_queue",
+  "mailbrief_muted_news",
+];
+function signOutDevice() {
+  // The account button is a privacy boundary, not just a key-screen shortcut:
+  // remove cached mail, messages, flags, and unsent replies from this device.
+  PRIVATE_LOCAL_KEYS.forEach(k => localStorage.removeItem(k));
+  // If Firebase Auth is already active, sign it out too. Never make removal of
+  // the local private cache wait on a CDN or network request.
+  try { if (_fbAuth && _fbMod) _fbMod.signOut(_fbAuth).catch(() => {}); } catch (_) {}
+  location.reload();
+}
+$("lockBtn").addEventListener("click", signOutDevice);
 
 // ===== Messages (Beeper bridge) =====
 var MSGS = null;
@@ -2077,11 +2091,20 @@ function renderMessages() {
       (c.messages || []).some(m => matchText(SEARCH, m.text)));
   }
   if (!chats.length) {
-    const none = !MSGS ? "Connecting to your messages…"
-      : SEARCH ? "No matching conversations."
-      : MSGVIEW === "dm" ? "No DMs yet. Connect LinkedIn / Signal / Slack / WhatsApp in Beeper."
-      : "No texts yet.";
-    v.appendChild(el("div", "empty", none));
+    if (SEARCH) {
+      const empty = el("div", "emptyState");
+      empty.appendChild(el("div", "emptyTitle", "No conversation matches"));
+      empty.appendChild(el("div", "emptyCopy", "Try another word or clear the search to see every conversation."));
+      const clear = el("button", "emptyAction", "Clear search");
+      clear.addEventListener("click", clearSearch);
+      empty.appendChild(clear);
+      v.appendChild(empty);
+    } else {
+      const none = !MSGS ? "Connecting to your messages…"
+        : MSGVIEW === "dm" ? "No DMs yet. Connect LinkedIn / Signal / Slack / WhatsApp in Beeper."
+        : "No texts yet.";
+      v.appendChild(el("div", "empty", none));
+    }
     return;
   }
   if (chats.some(c => c.unread > 0)) {

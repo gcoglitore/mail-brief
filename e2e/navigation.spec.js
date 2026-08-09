@@ -29,6 +29,17 @@ test("mobile search exposes state and can recover from no results", async ({ pag
   await expect(page.getByText("No priority matches")).toBeHidden();
 });
 
+test("DM search provides a clear recovery action", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("tab", { name: /DMs/ }).click();
+  await page.locator("#searchToggle").click();
+  await page.locator("#searchBox").fill("nothing-matches-this");
+
+  await expect(page.getByText("No conversation matches", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Clear search", exact: true }).click();
+  await expect(page.getByRole("button", { name: /Open and reply to Morgan Lee via LinkedIn/ })).toBeVisible();
+});
+
 test("arrow keys move between tabs (roving tabindex)", async ({ page }) => {
   await signIn(page);
   await page.locator("#tabPriority").focus();

@@ -22,7 +22,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: e2e
-        run: npm install
+        run: npm ci
 
       - name: Install Chromium
         working-directory: e2e
