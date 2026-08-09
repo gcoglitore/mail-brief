@@ -3,8 +3,8 @@
   "main": "index.js",
   "engines": { "node": "20" },
   "dependencies": {
-    "@google-cloud/functions-framework": "^3.4.0",
-    "nodemailer": "^6.9.13",
-    "imapflow": "^1.0.164"
+    "@google-cloud/functions-framework": "^5.0.5",
+    "nodemailer": "^9.0.5",
+    "imapflow": "^1.6.6"
   }
 }

@@ -14,7 +14,15 @@ test("morning brief summarizes the day and opens its source items", async ({ pag
   await expect(brief.getByText("U.S. TOP HEADLINES")).toBeVisible();
   await expect(brief.getByText("WORLD TOP HEADLINES")).toBeVisible();
   await expect(brief.getByText("Board call")).toBeVisible();
+  await expect(brief.locator(".mbCalendar")).toBeVisible();
+  await expect(brief.locator(".mbCalEvent")).toHaveCount(2);
+  await expect(brief.locator(".mbCalCount")).toHaveText("2 events");
+  await expect(brief.getByText("Zoom")).toBeVisible();
   await expect(brief.getByRole("link", { name: /Congress advances/ })).toHaveAttribute("href", "https://news.google.com/articles/us-1");
+
+  const sectionOrder = await brief.locator(".mbSectionTitle").allTextContents();
+  expect(sectionOrder.slice(0, 2)).toEqual(["U.S. TOP HEADLINES", "WORLD TOP HEADLINES"]);
+  expect(sectionOrder.indexOf("TODAY'S CALENDAR")).toBeLessThan(sectionOrder.indexOf("NEEDS YOUR ATTENTION"));
 
   await brief.getByRole("button", { name: /Open Sign term sheet/ }).click();
   await expect(page.locator("#readerSubject")).toHaveText("Term sheet — sign by Friday?");
@@ -23,6 +31,18 @@ test("morning brief summarizes the day and opens its source items", async ({ pag
   await brief.getByRole("button", { name: /Open see you at 6 from Sarah/ }).click();
   await expect(page.locator("#thread")).toHaveClass(/open/);
   await expect(page.locator("#threadTitle")).toHaveText("Sarah");
+});
+
+test("daily brief keeps the calendar visible on an empty day", async ({ page }) => {
+  const briefData = makeBrief();
+  briefData.daily_brief.schedule = [];
+  briefData.daily_brief.counts.events = 0;
+  await signIn(page, { brief: briefData });
+
+  const brief = page.locator(".morningBrief");
+  await expect(brief.getByText("TODAY'S CALENDAR")).toBeVisible();
+  await expect(brief.getByText("No events on your calendar today.")).toBeVisible();
+  await expect(brief.locator(".mbCalCount")).toHaveText("0 events");
 });
 
 test("refresh brief requests a new source snapshot", async ({ page }) => {

@@ -3,9 +3,9 @@ name: Tests
 on:
   push:
     branches: [main]
-    paths: ['pipeline/**', 'tests/**', '.github/workflows/test.yml']
+    paths: ['pipeline/**', 'tests/**', 'functions/**', 'public/*.js', '.github/workflows/test.yml']
   pull_request:
-    paths: ['pipeline/**', 'tests/**']
+    paths: ['pipeline/**', 'tests/**', 'functions/**', 'public/*.js']
 
 jobs:
   test:
@@ -18,6 +18,17 @@ jobs:
         with:
           python-version: '3.12'
       - name: Compile check
-        run: python -m py_compile pipeline/refresh_mail.py
+        run: python -m py_compile pipeline/*.py
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+      - name: Install Function dependencies
+        run: npm ci --prefix functions
+      - name: Check browser and Function JavaScript
+        run: node --check public/app.js && node --check public/sw.js && node --check functions/index.js
+      - name: Audit production Function dependencies
+        run: npm audit --prefix functions --omit=dev --audit-level=high

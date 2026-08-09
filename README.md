@@ -104,12 +104,14 @@ bottom. The browser writes each reply to a stable, retry-safe entry under
 local storage and is queued automatically after reconnecting.
 
 The Mac connector drains that queue every five minutes: iMessage/SMS replies go
-through Messages, while Signal, Slack, WhatsApp, Telegram, Instagram, Messenger,
-and other connected DMs go through Beeper. The UI says **queued** until the next
-message snapshot contains the sent reply; the Mac must be awake and the relevant
-service must be connected. Direct iMessage/SMS conversations are supported;
-local Apple group-chat replies remain disabled because `chat.db` does not expose
-a safe send target for them.
+through Messages, while LinkedIn, Signal, Slack, WhatsApp, Telegram, Instagram,
+Messenger, and other connected DMs go through Beeper. Connect LinkedIn from
+Beeper Desktop under **Settings → Accounts → Add an Account → LinkedIn**. Beeper
+initially exposes only the latest message in each LinkedIn chat rather than its
+full history. The UI says **queued** until the next message snapshot contains the
+sent reply; the Mac must be awake and the relevant service must be connected.
+Direct iMessage/SMS conversations are supported; local Apple group-chat replies
+remain disabled because `chat.db` does not expose a safe send target for them.
 
 ## Rotating the access key
 

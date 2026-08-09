@@ -114,7 +114,7 @@ function openSettings(reopen) {
     v => { PREFS.aging = Number(v); });
   sheet.appendChild(el("div", "setGroup", "IN PRIORITY"));
   toggle("Include Texts (iMessage / SMS)", PREFS.inclTexts, v => { PREFS.inclTexts = v; });
-  toggle("Include DMs (Signal / Slack…)", PREFS.inclDMs, v => { PREFS.inclDMs = v; });
+  toggle("Include DMs (LinkedIn / Signal…)", PREFS.inclDMs, v => { PREFS.inclDMs = v; });
   sheet.appendChild(el("div", "setGroup", "ALL MAIL"));
   toggle("Show FYI section", PREFS.showFyi, v => { PREFS.showFyi = v; });
   sheet.appendChild(el("div", "setGroup", "EMAIL"));
@@ -835,6 +835,20 @@ function dailyEventTime(event) {
     timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit",
   });
 }
+function dailyEventTimeRange(event) {
+  if (event.all_day) return "All day";
+  const start = dailyEventTime(event);
+  if (!event.end || event.end <= event.start) return start;
+  const end = new Date(event.end * 1000).toLocaleTimeString([], {
+    timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit",
+  });
+  const startPeriod = (start.match(/\b(?:AM|PM)$/) || [])[0];
+  const endPeriod = (end.match(/\b(?:AM|PM)$/) || [])[0];
+  if (startPeriod && startPeriod === endPeriod) {
+    return start.replace(/\s*(?:AM|PM)$/, "") + "–" + end;
+  }
+  return start + "–" + end;
+}
 async function openDailyFocus(focus) {
   if (!focus) return;
   if (focus.kind === "mail") {
@@ -888,18 +902,39 @@ function dailyActionList(rows, ranked) {
   });
   return list;
 }
-function dailyAgenda(events) {
-  const agenda = el("div", "mbAgenda");
-  events.slice(0, 6).forEach(event => {
-    const row = el("div", "mbEvent");
-    row.appendChild(el("span", "mbEventTime", dailyEventTime(event)));
-    const copy = el("span", "mbEventCopy");
-    copy.appendChild(el("span", "mbEventTitle", event.title || "(busy)"));
-    if (event.location) copy.appendChild(el("span", "mbEventLocation", event.location));
-    row.appendChild(copy);
-    agenda.appendChild(row);
-  });
-  return agenda;
+function dailyCalendar(events, generatedAt) {
+  const calendar = el("div", "mbCalendar");
+  calendar.setAttribute("aria-label", "Today's calendar");
+  const head = el("div", "mbCalHead");
+  const day = new Date((generatedAt || Date.now() / 1000) * 1000)
+    .toLocaleDateString([], { timeZone: "America/Los_Angeles", weekday: "long", month: "long", day: "numeric" });
+  head.appendChild(el("span", "mbCalDate", day));
+  head.appendChild(el("span", "mbCalCount", events.length + (events.length === 1 ? " event" : " events")));
+  calendar.appendChild(head);
+
+  const body = el("div", "mbCalBody");
+  const now = Date.now() / 1000;
+  if (!events.length) {
+    body.appendChild(el("div", "mbCalEmpty", "No events on your calendar today."));
+  } else {
+    events.slice(0, 6).forEach(event => {
+      const happening = !event.all_day && event.start <= now && (!event.end || event.end >= now);
+      const row = el("div", "mbCalEvent" + (happening ? " now" : ""));
+      row.appendChild(el("span", "mbCalTime", dailyEventTimeRange(event)));
+      const track = el("span", "mbCalTrack");
+      track.appendChild(el("span", "mbCalDot"));
+      row.appendChild(track);
+      const copy = el("span", "mbCalCopy");
+      const title = el("span", "mbCalTitle", event.title || "(busy)");
+      if (happening) title.appendChild(el("span", "mbCalNow", "NOW"));
+      copy.appendChild(title);
+      if (event.location) copy.appendChild(el("span", "mbCalLocation", event.location));
+      row.appendChild(copy);
+      body.appendChild(row);
+    });
+  }
+  calendar.appendChild(body);
+  return calendar;
 }
 function dailyNewsList(rows) {
   const list = el("div", "mbNewsList");
@@ -942,6 +977,17 @@ function renderDailyBrief(parent) {
   card.appendChild(el("div", "mbHeadline", daily.headline || "Your day is ready"));
   card.appendChild(el("p", "mbSummary", daily.summary || ""));
 
+  // Headlines belong near the top of the brief, before the day's task and mail
+  // lists, so the news scan is immediate instead of buried at the bottom.
+  const news = daily.news && typeof daily.news === "object" ? daily.news : {};
+  const national = Array.isArray(news.national) ? news.national : [];
+  const international = Array.isArray(news.international) ? news.international : [];
+  const newsGrid = el("div", "mbColumns mbNewsColumns");
+  if (national.length) newsGrid.appendChild(dailyBlock("U.S. TOP HEADLINES", dailyNewsList(national)));
+  if (international.length) newsGrid.appendChild(dailyBlock("WORLD TOP HEADLINES", dailyNewsList(international)));
+  if (newsGrid.childNodes.length) card.appendChild(newsGrid);
+  else if (daily.news) card.appendChild(el("div", "mbNewsUnavailable", "Headlines are temporarily unavailable — refresh later."));
+
   const counts = daily.counts || {};
   const stats = el("div", "mbStats");
   [[counts.attention == null ? (daily.focus || []).length : counts.attention, "need attention"],
@@ -957,23 +1003,14 @@ function renderDailyBrief(parent) {
   const focus = Array.isArray(daily.focus) ? daily.focus : [];
   const schedule = Array.isArray(daily.schedule) ? daily.schedule : [];
   const dayGrid = el("div", "mbColumns mbDayColumns");
+  dayGrid.appendChild(dailyBlock("TODAY'S CALENDAR", dailyCalendar(schedule, daily.generated_at), "mbCalendarBlock"));
   if (focus.length) dayGrid.appendChild(dailyBlock("NEEDS YOUR ATTENTION", dailyActionList(focus, true)));
-  if (schedule.length) dayGrid.appendChild(dailyBlock("TODAY'S CALENDAR", dailyAgenda(schedule)));
-  if (dayGrid.childNodes.length) card.appendChild(dayGrid);
+  card.appendChild(dayGrid);
 
   const importantUnread = Array.isArray(daily.important_unread) ? daily.important_unread : [];
   if (importantUnread.length) {
     card.appendChild(dailyBlock("IMPORTANT UNREAD EMAILS", dailyActionList(importantUnread, false), "mbUnreadBlock"));
   }
-
-  const news = daily.news && typeof daily.news === "object" ? daily.news : {};
-  const national = Array.isArray(news.national) ? news.national : [];
-  const international = Array.isArray(news.international) ? news.international : [];
-  const newsGrid = el("div", "mbColumns mbNewsColumns");
-  if (national.length) newsGrid.appendChild(dailyBlock("U.S. TOP HEADLINES", dailyNewsList(national)));
-  if (international.length) newsGrid.appendChild(dailyBlock("WORLD TOP HEADLINES", dailyNewsList(international)));
-  if (newsGrid.childNodes.length) card.appendChild(newsGrid);
-  else if (daily.news) card.appendChild(el("div", "mbNewsUnavailable", "Headlines are temporarily unavailable — refresh later."));
 
   card.appendChild(el("div", "mbPrepared", "Prepared " + new Date(daily.generated_at * 1000)
     .toLocaleTimeString([], { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" }) + " PT"));
@@ -1852,13 +1889,28 @@ $("keyReveal").addEventListener("click", () => {
   $("keyReveal").setAttribute("aria-pressed", String(show));
   inp.focus();
 });
-$("lockBtn").addEventListener("click", () => { localStorage.removeItem("mailbrief_key"); location.reload(); });
+const PRIVATE_LOCAL_KEYS = [
+  "mailbrief_key", "mailbrief_cache", "mailbrief_msgs", "mailbrief_flags",
+  "mailbrief_news_cache", "mailbrief_outbox", "mailbrief_msg_reply_queue",
+  "mailbrief_muted_news",
+];
+function signOutDevice() {
+  // The account button is a privacy boundary, not just a key-screen shortcut:
+  // remove cached mail, messages, flags, and unsent replies from this device.
+  PRIVATE_LOCAL_KEYS.forEach(k => localStorage.removeItem(k));
+  // If Firebase Auth is already active, sign it out too. Never make removal of
+  // the local private cache wait on a CDN or network request.
+  try { if (_fbAuth && _fbMod) _fbMod.signOut(_fbAuth).catch(() => {}); } catch (_) {}
+  location.reload();
+}
+$("lockBtn").addEventListener("click", signOutDevice);
 
 // ===== Messages (Beeper bridge) =====
 var MSGS = null;
 let threadChat = null;
 const NET_LABELS = [
-  ["signal", "SIGNAL"], ["slack", "SLACK"], ["whatsapp", "WHATSAPP"],
+  ["signal", "SIGNAL"], ["slack", "SLACK"], ["linkedin", "LINKEDIN"],
+  ["whatsapp", "WHATSAPP"],
   ["telegram", "TELEGRAM"], ["imessage", "iMSG"], ["googlemessages", "SMS"],
   ["sms", "SMS"], ["instagram", "INSTA"], ["twitter", "X"], ["discord", "DISCORD"],
   ["messenger", "MSGR"], ["facebook", "MSGR"],
@@ -1889,7 +1941,7 @@ function chatNetworkName(c) {
   const n = netClass(c && c.network);
   return ({
     imessage: "iMessage", sms: "SMS", signal: "Signal", slack: "Slack",
-    whatsapp: "WhatsApp", telegram: "Telegram", instagram: "Instagram",
+    linkedin: "LinkedIn", whatsapp: "WhatsApp", telegram: "Telegram", instagram: "Instagram",
     twitter: "X", discord: "Discord", messenger: "Messenger", facebook: "Messenger",
   })[n] || netLabel(c && c.network);
 }
@@ -2029,7 +2081,7 @@ function renderMessages() {
       "line-height:1.4;text-align:left;background:rgba(212,160,23,.12);" +
       "border:1px solid rgba(212,160,23,.35);color:var(--gold,#d4a017)";
     banner.textContent = "Messages last synced " + ago(gen) + " ago — your Mac connector looks " +
-      "offline. DMs (Slack, Signal, WhatsApp) only refresh while your Mac is on.";
+      "offline. DMs (LinkedIn, Slack, Signal, WhatsApp) only refresh while your Mac is on.";
     v.appendChild(banner);
   }
   let chats = (MSGS && MSGS.chats) || [];
@@ -2039,11 +2091,20 @@ function renderMessages() {
       (c.messages || []).some(m => matchText(SEARCH, m.text)));
   }
   if (!chats.length) {
-    const none = !MSGS ? "Connecting to your messages…"
-      : SEARCH ? "No matching conversations."
-      : MSGVIEW === "dm" ? "No DMs yet. Connect Signal / Slack / WhatsApp / Messenger in Beeper."
-      : "No texts yet.";
-    v.appendChild(el("div", "empty", none));
+    if (SEARCH) {
+      const empty = el("div", "emptyState");
+      empty.appendChild(el("div", "emptyTitle", "No conversation matches"));
+      empty.appendChild(el("div", "emptyCopy", "Try another word or clear the search to see every conversation."));
+      const clear = el("button", "emptyAction", "Clear search");
+      clear.addEventListener("click", clearSearch);
+      empty.appendChild(clear);
+      v.appendChild(empty);
+    } else {
+      const none = !MSGS ? "Connecting to your messages…"
+        : MSGVIEW === "dm" ? "No DMs yet. Connect LinkedIn / Signal / Slack / WhatsApp in Beeper."
+        : "No texts yet.";
+      v.appendChild(el("div", "empty", none));
+    }
     return;
   }
   if (chats.some(c => c.unread > 0)) {

@@ -4,7 +4,7 @@
 Pulls conversations from two sources and publishes one merged snapshot to the
 Realtime Database so the phone/desktop app shows them next to email:
 
-  • Beeper Desktop API (Signal / Slack / WhatsApp / …) — needs ~/.beeper-token
+  • Beeper Desktop API (LinkedIn / Signal / Slack / WhatsApp / …) — needs ~/.beeper-token
   • iMessage / SMS — read straight from this Mac's own Messages database
     (~/Library/Messages/chat.db). No Apple-ID re-registration → no ban risk.
     Requires Full Disk Access for whatever runs this script.
@@ -43,9 +43,10 @@ APPLE_EPOCH = 978307200  # 2001-01-01 in unix time
 # Networks you expect to always have recent DMs. If one is absent from a batch,
 # the bridge says so — a single logged-out connector (Slack, Signal, …) is then
 # obvious in the log instead of silently producing zero chats for that network.
-# Override with MAILBRIEF_EXPECTED_NETWORKS="slack,signal,whatsapp".
+# Override with MAILBRIEF_EXPECTED_NETWORKS="linkedin,slack,signal,whatsapp".
 EXPECTED_NETWORKS = [n.strip().lower() for n in
-                     os.environ.get("MAILBRIEF_EXPECTED_NETWORKS", "slack,signal").split(",") if n.strip()]
+                     os.environ.get("MAILBRIEF_EXPECTED_NETWORKS", "linkedin,slack,signal").split(",") if n.strip()]
+NETWORK_NAMES = {"linkedin": "LinkedIn"}
 
 
 # ---------- Beeper ----------
@@ -102,7 +103,7 @@ def iso_epoch(ts):
 def build_beeper_chats(token):
     if not token:
         print("Beeper token missing — set BEEPER_ACCESS_TOKEN or create ~/.beeper-token. "
-              "No Slack/Signal/WhatsApp DMs will be fetched.")
+              "No LinkedIn/Slack/Signal/WhatsApp DMs will be fetched.")
         return []
     try:
         chats = items_of(beeper_get(f"/v1/chats?limit={MAX_CHATS * 2}", token))
@@ -126,7 +127,8 @@ def build_beeper_chats(token):
     present = "".join(by_net)
     for net in EXPECTED_NETWORKS:
         if net not in present:
-            print(f"  note: no {net.capitalize()} chats in this batch — check that {net.capitalize()} "
+            display = NETWORK_NAMES.get(net, net.capitalize())
+            print(f"  note: no {display} chats in this batch — check that {display} "
                   f"is connected in Beeper and has recent activity (only the {MAX_CHATS} "
                   "most-recently-active chats are kept).")
     out = []

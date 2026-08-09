@@ -153,14 +153,37 @@
     text-overflow: ellipsis; white-space: nowrap; }
   .mbFocusMeta { overflow: hidden; color: var(--faint); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
   .mbArrow { color: var(--gold); font-size: 20px; line-height: 1; }
-  .mbAgenda { display: flex; flex-direction: column; gap: 7px; }
-  .mbEvent { display: flex; gap: 10px; align-items: flex-start; padding: 2px 7px; }
-  .mbEventTime { width: 54px; flex: none; color: var(--gold); font-size: 10.5px; font-weight: 800; }
-  .mbEventCopy { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
-  .mbEventTitle { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-  .mbEventLocation { overflow: hidden; color: var(--faint); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+  .mbCalendar { overflow: hidden; border: 1px solid var(--line); border-radius: 11px;
+    background: rgba(9,13,18,.44); }
+  .mbCalHead { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 9px 11px; border-bottom: 1px solid var(--line); background: rgba(74,134,232,.055); }
+  .mbCalDate { color: var(--text); font-size: 11.5px; font-weight: 750; }
+  .mbCalCount { color: var(--faint); font-size: 9.5px; white-space: nowrap; }
+  .mbCalBody { padding: 4px 0; }
+  .mbCalEvent { display: grid; grid-template-columns: 90px 13px minmax(0, 1fr); gap: 8px;
+    min-height: 49px; padding: 7px 11px; }
+  .mbCalEvent + .mbCalEvent { border-top: 1px solid rgba(255,255,255,.035); }
+  .mbCalTime { padding-top: 1px; color: var(--gold); font-size: 10px; font-weight: 800;
+    font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .mbCalTrack { position: relative; display: flex; justify-content: center; }
+  .mbCalTrack::before { content: ""; position: absolute; top: 10px; bottom: -18px; width: 1px;
+    background: var(--line); }
+  .mbCalEvent:last-child .mbCalTrack::before { display: none; }
+  .mbCalDot { position: relative; z-index: 1; width: 7px; height: 7px; margin-top: 4px;
+    border: 2px solid var(--blue); border-radius: 50%; background: var(--panel2); }
+  .mbCalCopy { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+  .mbCalTitle { overflow: hidden; color: var(--text); font-size: 11.5px; font-weight: 680;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .mbCalLocation { overflow: hidden; color: var(--faint); font-size: 9.5px;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .mbCalNow { display: inline-block; margin-left: 6px; padding: 1px 5px; border-radius: 999px;
+    background: rgba(63,179,127,.13); color: var(--green); font-size: 8px; font-weight: 900; letter-spacing: .5px; }
+  .mbCalEvent.now .mbCalDot { border-color: var(--green); background: var(--green);
+    box-shadow: 0 0 0 3px rgba(63,179,127,.12); }
+  .mbCalEmpty { padding: 17px 12px; color: var(--faint); font-size: 11px; text-align: center; }
   .mbUnreadBlock { margin-top: 2px; padding-top: 1px; border-top: 1px solid rgba(255,255,255,.04); }
-  .mbNewsColumns { margin-top: 2px; }
+  .mbNewsColumns { margin-top: 3px; padding-bottom: 5px; border-bottom: 1px solid rgba(255,255,255,.05); }
+  .mbNewsColumns .mbSectionTitle { color: var(--gold); }
   .mbNewsList { display: flex; flex-direction: column; gap: 4px; }
   .mbNewsRow { display: flex; min-width: 0; flex-direction: column; gap: 2px; padding: 8px 7px;
     border-radius: 9px; color: inherit; text-decoration: none; }
@@ -520,6 +543,7 @@
   .net { font-size: 9px; font-weight: 800; letter-spacing: .5px; padding: 3px 7px; border-radius: 6px;
     white-space: nowrap; color: #fff; }
   .net.signal { background: #3a76f0; } .net.slack { background: #611f69; }
+  .net.linkedin { background: #0a66c2; }
   .net.whatsapp { background: #25d366; color: #07331a; } .net.telegram { background: #2aabee; }
   .net.imessage { background: #3a76f0; }
   .net.sms, .net.googlemessages { background: #34c759; color: #07331a; }

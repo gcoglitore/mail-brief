@@ -28,10 +28,10 @@
         "msg_outbox": {
           ".write": true,
           "$oid": {
-            ".validate": "!newData.exists() || newData.hasChild('chatID')",
+            ".validate": "!newData.exists() || (newData.hasChildren(['chatID', 'at']) && ((!newData.hasChild('action') && newData.hasChild('text')) || (newData.child('action').val() == 'send' && newData.hasChild('text')) || (newData.child('action').val() == 'read' && !newData.hasChild('text'))))",
             "chatID": { ".validate": "newData.isString() && newData.val().length <= 512" },
-            "text": { ".validate": "newData.isString() && newData.val().length <= 20000" },
-            "action": { ".validate": "newData.isString() && newData.val().length <= 32" },
+            "text": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 2000" },
+            "action": { ".validate": "newData.val() == 'send' || newData.val() == 'read'" },
             "at": { ".validate": "newData.isNumber()" },
             "$other": { ".validate": false }
           }
