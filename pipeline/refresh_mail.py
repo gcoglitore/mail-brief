@@ -22,6 +22,7 @@ import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -732,6 +733,29 @@ def db_delete(path, token):
         resp.read()
 
 
+def urlopen_with_retry(req, timeout=30, attempts=3, opener=None, sleeper=None, label="request"):
+    """Open an idempotent request with short retries for transient network failures."""
+    opener = opener or urllib.request.urlopen
+    sleeper = sleeper or time.sleep
+    for attempt in range(1, attempts + 1):
+        try:
+            return opener(req, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code in (408, 425, 429) or 500 <= exc.code < 600
+            if not retryable or attempt == attempts:
+                raise
+            delay = min(2 ** (attempt - 1), 4)
+            print(f"{label}: HTTP {exc.code}; retrying in {delay}s ({attempt}/{attempts})")
+            sleeper(delay)
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as exc:
+            if attempt == attempts:
+                raise
+            delay = min(2 ** (attempt - 1), 4)
+            print(f"{label}: transient network failure; retrying in {delay}s "
+                  f"({attempt}/{attempts}): {str(exc)[:100]}")
+            sleeper(delay)
+
+
 def push_to_subscribers(payload_obj, key, token, label):
     """Deliver one source-backed push payload and remove expired subscriptions."""
     pem_path = os.environ.get("VAPID_PEM_PATH")
@@ -956,7 +980,7 @@ def main():
         method="PUT",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urlopen_with_retry(req, timeout=30, attempts=3, label="Publish") as resp:
         resp.read()
     if daily_generated and daily_requested:
         try:

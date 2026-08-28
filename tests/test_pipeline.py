@@ -10,6 +10,7 @@ import datetime as dt
 import os
 import sys
 import unittest
+import urllib.error
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "pipeline"))
 import refresh_mail as rm  # noqa: E402
@@ -129,6 +130,47 @@ class NewsHeadlines(unittest.TestCase):
 
         self.assertEqual(len(out["national"]), 1)
         self.assertEqual(out["international"], [])
+
+
+class PublishRetry(unittest.TestCase):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return b"ok"
+
+    def test_retries_connection_resets_with_bounded_backoff(self):
+        calls = []
+        sleeps = []
+
+        def opener(req, timeout):
+            calls.append((req, timeout))
+            if len(calls) < 3:
+                raise urllib.error.URLError(ConnectionResetError(104, "reset"))
+            return self.Response()
+
+        req = rm.urllib.request.Request("https://example.test", data=b"{}", method="PUT")
+        with rm.urlopen_with_retry(req, opener=opener, sleeper=sleeps.append, label="Publish") as response:
+            self.assertEqual(response.read(), b"ok")
+
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(sleeps, [1, 2])
+
+    def test_does_not_retry_non_transient_http_errors(self):
+        calls = []
+
+        def opener(req, timeout):
+            calls.append(req)
+            raise urllib.error.HTTPError(req.full_url, 400, "bad request", {}, None)
+
+        req = rm.urllib.request.Request("https://example.test", data=b"{}", method="PUT")
+        with self.assertRaises(urllib.error.HTTPError):
+            rm.urlopen_with_retry(req, opener=opener, sleeper=lambda _: None, label="Publish")
+        self.assertEqual(len(calls), 1)
 
 
 class HtmlToText(unittest.TestCase):
